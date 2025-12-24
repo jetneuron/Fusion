@@ -1,0 +1,40 @@
+name: example_graph
+
+units:
+  - id: uid1
+    name: input_node
+    type: SpreadSheetUnitTask
+    config:
+      path: "/Users/nigel/Workspace/code/nigel/Fusion Pro/graph-units/graph-unit-tests/tests/data/test_skin_attribute_data.xlsx"
+      sheet_name: "Sheet1"
+      field_name_row_index: 1
+      skip_rows: 3
+
+  - id: uid2
+    name: input_node
+    type: SSHUnitTask
+    config:
+      user: nigel
+      private_key: /Users/nigel/.ssh/id_rsa
+      shell: |
+        echo "test" >> /tmp/data.test
+      separator: "\t"
+
+  - id: uid3
+    name: output_node
+    type: DebugOutputUnitTask
+    config:
+      hide_console: false
+      show_report: true
+
+edges:
+  - id: eid1
+    source: uid1
+    target: uid2
+    config:
+      fee: bee
+  - id: eid2
+    source: uid1
+    target: uid3
+    config:
+      fee: bee

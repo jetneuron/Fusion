@@ -1,0 +1,59 @@
+syntax = "proto3";
+package transfer;
+
+option java_package = "com.fusionpro.proto";
+
+/**
+ * Row that represent data, including one or more columns, which can represent a data set.
+ */
+message Row {
+  /**
+   * data offset
+   */
+  uint64 offset = 1;
+  /**
+   * include all columns in row data.
+   */
+  repeated Column columns = 2;
+  /**
+   * mask value which can indicate the special row data. eg: barrier, EOF and so on.
+   */
+  uint32 mask = 3;
+  /**
+   * source
+   */
+  string source = 4;
+  /**
+   * raw data
+   */
+  bytes raw = 5;
+}
+
+// Supported data types.
+enum DataType {
+  str = 0;
+  bool = 1;
+  f64 = 2;
+  f32 = 3;
+  i32 = 4;
+  i64 = 5;
+  bytes = 6;
+  json = 7;
+  unknown = 8;
+}
+
+// Column struct in each row.
+message Column {
+  uint32 index = 1;
+  string field = 2;
+  DataType dt = 3;
+  bool is_null = 4;
+
+  int32 i32_val = 5;
+  int64 i64_val = 6;
+  double f64_val = 7;
+  float f32_val = 8;
+  string str_val = 9;
+  bool bool_val = 10;
+  bytes bytes_val = 11;
+}

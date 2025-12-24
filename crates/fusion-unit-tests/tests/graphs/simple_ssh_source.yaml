@@ -1,0 +1,27 @@
+name: example_graph
+
+units:
+  - id: uid1
+    name: input_node
+    type: SSHUnitTask
+    config:
+      host: 172.31.88.128
+      port: 59522
+      private_key: /Users/nigel/.ssh/company-ssh-key/tunnel_ssh_rsa/id_rsa
+      shell: |
+        cat /data/logs/service-applet/access/access.log | grep websocket | grep IN
+      separator: "\t"
+
+  - id: uid2
+    name: output_node
+    type: DebugOutputUnitTask
+    config:
+      hide_console: true
+      show_report: true
+
+edges:
+  - id: eid1
+    source: uid1
+    target: uid2
+    config:
+      fee: bee

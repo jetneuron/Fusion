@@ -1,0 +1,76 @@
+name: example_graph
+
+units:
+  - id: input
+    name: input_node
+    type: DebugInputUnitTask
+    version: builtin
+    config:
+      times: 5
+      column_count: 3
+      interval: 0
+
+  - id: map
+    name: output_node
+    type: MapUnitTask
+    version: builtin
+    config:
+      script: |
+        local function parse_date(date_str)
+          local year, month, day = date_str:match("(%d+)-(%d+)-(%d+)")
+          return os.time({year = tonumber(year), month = tonumber(month), day = tonumber(day)})
+        end
+        
+        local function format_date(timestamp)
+          return os.date("%Y-%m-%d", timestamp)
+        end
+        
+        local function generate_date_range(start_date, end_date)
+          local start_timestamp = parse_date(start_date)
+          local end_timestamp = parse_date(end_date)
+          
+          local dates = {}
+          local current_timestamp = start_timestamp
+          
+          while current_timestamp <= end_timestamp do
+            table.insert(dates, format_date(current_timestamp))
+            current_timestamp = current_timestamp + 86400
+          end
+          
+          return dates
+        end
+        
+        local start_date = "2025-01-22"
+        local end_date = "2025-01-25"
+        
+        local dates = generate_date_range(start_date, end_date)
+        
+        local idx = 0
+        local row = ctx:newRow()
+        for _, date in ipairs(dates) do
+          row['date' .. idx] = date
+          idx = idx + 1
+        end
+        ctx:send(row)
+      type: Lua
+
+  - id: output
+    name: output
+    type: DebugOutputUnitTask
+    version: builtin
+    config:
+      show_report: true
+
+edges:
+  - id: eid1
+    source: input
+    target: map
+    config:
+      fee: bee
+
+  - id: eid2
+    source: map
+    target: output
+    config:
+      fee: bee
+

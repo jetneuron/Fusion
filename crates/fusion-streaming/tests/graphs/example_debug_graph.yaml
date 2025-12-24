@@ -1,0 +1,24 @@
+name: debug_graph
+
+units:
+  - id: uid1
+    name: input_node
+    type: DebugInputUnitTask
+    config:
+      iter_times: 3
+      column_count: 3
+      interval: 300
+
+  - id: uid2
+    name: output_node
+    type: DebugOutputUnitTask
+    config:
+      foo2: bar2
+      int_field: 1.32
+
+edges:
+  - id: eid1
+    source: uid1
+    target: uid2
+    config:
+      fee: bee

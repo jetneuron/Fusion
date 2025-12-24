@@ -1,0 +1,17 @@
+[workspace.package]
+authors = ["Nigel"]
+homepage = "https://www.jetneuron.com/"
+edition = "2024"
+
+[workspace]
+members = ["crates/fusion-derive","crates/fusion-streaming", "crates/fusion-unit-datafusion", "crates/fusion-unit-excel", "crates/fusion-unit-sdk", "crates/fusion-unit-ssh", "crates/fusion-unit-tests"]
+resolver = "3"
+
+[profile.dev]
+debug = true
+debug-assertions = true
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+debug = false

@@ -1,0 +1,28 @@
+name: example_graph
+
+units:
+  - id: http
+    name: http
+    type: HttpUnitTask
+    version: builtin
+    config:
+      url: https://ipapi.co/json/
+      method: get
+      mapping:
+        - name: ip
+          json_path: $.ip
+
+  - id: output
+    name: output
+    type: DebugOutputUnitTask
+    version: builtin
+    config:
+      show_report: true
+
+edges:
+  - id: eid1
+    source: http
+    target: output
+    config:
+      fee: bee
+

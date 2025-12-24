@@ -1,0 +1,47 @@
+name: example_graph
+
+units:
+  - id: input
+    name: input_node
+    type: DebugInputUnitTask
+    version: builtin
+    config:
+      times: 10
+      column_count: 3
+      interval: 0
+
+  - id: output1
+    name: output1
+    type: DebugOutputUnitTask
+    version: builtin
+    config:
+      hide_console: true
+      show_report: true
+
+  - id: output2
+    name: output2
+    type: DebugOutputUnitTask
+    version: builtin
+    config:
+      hide_console: true
+      show_report: true
+
+edges:
+  - id: eid1
+    source: input
+    target: output1
+    config:
+      condition:
+        script: |
+          return row.offset % 2 == 1
+      fee: bee
+
+  - id: eid2
+    source: input
+    target: output2
+    config:
+      condition:
+        script: |
+          return row.offset % 3 == 1
+      fee: bee
+

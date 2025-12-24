@@ -1,0 +1,13 @@
+[package]
+name = "fusion-derive"
+version = "0.1.0"
+authors.workspace = true
+homepage.workspace = true
+edition.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "2.0.91"
+quote = "1.0.37"
