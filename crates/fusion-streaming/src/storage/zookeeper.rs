@@ -1,6 +1,6 @@
-use crate::storage::types::{ConnectionPropResult, DataSource, DataSourceResult, IntoDataSource};
 use crate::storage::types::DataSourceProp;
 use crate::storage::types::IntoConnectionProp;
+use crate::storage::types::{ConnectionPropResult, DataSource, DataSourceResult, IntoDataSource};
 
 #[derive(Debug)]
 struct Zookeeper {
@@ -18,9 +18,14 @@ impl DataSourceProp for ZookeeperProp {}
 impl DataSource for Zookeeper {}
 
 impl<T> IntoConnectionProp<ZookeeperProp> for (T, u16)
-    where T: Into<String> {
+where
+    T: Into<String>,
+{
     fn into_connection_prop(self) -> ConnectionPropResult<ZookeeperProp> {
-        Ok(ZookeeperProp { host: self.0.into(), port: self.1 })
+        Ok(ZookeeperProp {
+            host: self.0.into(),
+            port: self.1,
+        })
     }
 }
 

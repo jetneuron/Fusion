@@ -1,11 +1,11 @@
 use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
 use jsonpath_rust::JsonPath;
+use petgraph::data::DataMap;
 use petgraph::graph::DiGraph;
 use protobuf::EnumOrUnknown;
 use serde_json::{Error, Value};
 use std::collections::HashMap;
 use std::str::FromStr;
-use petgraph::data::DataMap;
 
 pub struct JsonRowMapper {
     name: String,
@@ -60,7 +60,11 @@ impl JsonParse for Value {
     }
 }
 
-fn transform_as_tree(json: &Value, mappers: Vec<JsonRowMapper>, mut graph: DiGraph<JsonColumnFamilyNode, String>) -> HashMap<String, u16> {
+fn transform_as_tree(
+    json: &Value,
+    mappers: Vec<JsonRowMapper>,
+    mut graph: DiGraph<JsonColumnFamilyNode, String>,
+) -> HashMap<String, u16> {
     let mut mapper_index = HashMap::new();
     let mut idx = 0;
     for mapper in mappers {
@@ -72,7 +76,7 @@ fn transform_as_tree(json: &Value, mappers: Vec<JsonRowMapper>, mut graph: DiGra
                 let path = format!("$.{}", &name);
                 (path.clone(), JsonPath::from_str(path.as_str()).expect(""))
             }
-            Some(path) => (path.clone(), JsonPath::from_str(path.as_str()).expect(""))
+            Some(path) => (path.clone(), JsonPath::from_str(path.as_str()).expect("")),
         };
 
         let data = json_path.1.find_slice(json);
@@ -139,9 +143,7 @@ fn map_json_type(c: &mut Column, data: Value) {
 
 fn get_parent(path: Option<String>) -> String {
     match path {
-        None => {
-            "$".to_string()
-        }
+        None => "$".to_string(),
         Some(p) => {
             let cloned = p.clone();
             let parts: Vec<&str> = cloned.split(".").collect();

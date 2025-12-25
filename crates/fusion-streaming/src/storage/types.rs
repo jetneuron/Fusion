@@ -14,7 +14,6 @@ pub trait IntoConnectionProp<T: DataSourceProp> {
     fn into_connection_prop(self) -> ConnectionPropResult<T>;
 }
 
-
 #[derive(Debug)]
 pub struct DataSourceErr {}
 
@@ -55,6 +54,9 @@ impl FromStr for DataSourceId {
     }
 }
 
-pub trait IntoDataSource<T> where T: DataSource + ?Sized {
+pub trait IntoDataSource<T>
+where
+    T: DataSource + ?Sized,
+{
     fn into_datasource(self) -> DataSourceResult<Box<T>>;
 }

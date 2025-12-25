@@ -30,9 +30,8 @@ fn test() {
         .arg("root@10.22.5.221")
         .arg("-L")
         .arg("33412:r-j6c2odggsyfkswjs7r.redis.rds.aliyuncs.com:6379")
-        .spawn().unwrap_or_else(|e| {
-        panic!("failed to execute process: {}", e)
-    });
+        .spawn()
+        .unwrap_or_else(|e| panic!("failed to execute process: {}", e));
 
     let join_handle = thread::spawn(move || {
         let pid = child.id();

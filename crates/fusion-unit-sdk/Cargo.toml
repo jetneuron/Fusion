@@ -14,3 +14,4 @@ tokio = { version = "1.48.0", features = ["sync", "rt", "time"] }
 lazy_static = "1.5.0"
 log = "0.4.22"
 thiserror = "1.0.61"
+anyhow = "1.0.100"

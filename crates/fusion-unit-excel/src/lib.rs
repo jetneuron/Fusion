@@ -1,8 +1,11 @@
 mod utils;
 
 use crate::utils::with_field_names;
-use anyhow::{Error, Result};
-use calamine::{open_workbook, Data, DeError, RangeDeserializerBuilder, Reader, Xlsx, XlsxError};
+use anyhow::{Error, Result, bail};
+use calamine::{
+    Data, DeError, RangeDeserializerBuilder, Reader, Xlsx, XlsxError as CalamineXlsxError,
+    open_workbook,
+};
 use fusion_derive::LogicalTask;
 use fusion_unit_sdk::graph::types::{
     ComputingUnit, Context, InitUnit, MapUnit, SourceUnit, UnitConfig,
@@ -11,8 +14,11 @@ use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
 use fusion_unit_sdk::row::types::ColumnDescriptor;
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
+use log::info;
 use protobuf::{Enum, EnumOrUnknown};
-use rust_xlsxwriter::{Color, DocProperties, Format, FormatAlign, FormatBorder, Workbook, Worksheet};
+use rust_xlsxwriter::{
+    Color, DocProperties, Format, FormatAlign, FormatBorder, Workbook, Worksheet, XlsxError,
+};
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 
@@ -133,7 +139,8 @@ impl SpreadSheetUnitTask {
                         for (column_idx, header) in headers.iter().enumerate() {
                             let index = tmp_fields.len();
                             let column_name = header.to_string();
-                            let mut column_descriptor = ColumnDescriptor::from(column_name, &sample_data[column_idx]);
+                            let mut column_descriptor =
+                                ColumnDescriptor::from(column_name, &sample_data[column_idx]);
                             match &self.field_types {
                                 None => {}
                                 Some(types) => {
@@ -214,7 +221,7 @@ impl InitUnit for SpreadSheetUnitTask {
                 if !sink_mode {
                     match self.parse_field_names_from_excel(c) {
                         Ok(_) => {}
-                        Err(err) => panic!("error: {}", err)
+                        Err(err) => panic!("error: {}", err),
                     };
                 }
             }
@@ -239,18 +246,25 @@ impl InitUnit for SpreadSheetUnitTask {
 
 impl SourceUnit for SpreadSheetUnitTask {
     /// start to read excel file data. and emit row data one by one.
-    fn launch(&self, ctx: Arc<Context>) -> impl Future<Output=UnitResult<()>> + Send {
+    fn launch(
+        &self,
+        ctx: Arc<Context>,
+    ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send> {
         let path = self.path.clone();
         let sheet_name = self.sheet_name.clone();
 
         let auto_types = self.auto_types;
         let field_names = self.field_names.clone().unwrap_or(vec![]);
         let skip_rows = self.skip_rows.map(|x| x as i64).unwrap_or(-1);
-        async move {
+        Ok(async move {
             // open workbook file by provided path.
-            let mut workbook: Xlsx<_> = open_workbook(&path).map_err(XlsxErrorWrapper)?;
-            let range = workbook.worksheet_range(sheet_name.as_str()).map_err(XlsxErrorWrapper)?;
-            let mut iter = RangeDeserializerBuilder::new().from_range(&range).map_err(DeErrorWrapper)?;
+            let mut workbook: Xlsx<_> = open_workbook(&path).map_err(CalamineXlsxErrorWrapper)?;
+            let range = workbook
+                .worksheet_range(sheet_name.as_str())
+                .map_err(CalamineXlsxErrorWrapper)?;
+            let mut iter = RangeDeserializerBuilder::new()
+                .from_range(&range)
+                .map_err(DeErrorWrapper)?;
             let mut index = 0;
             let mut skipped = false;
             loop {
@@ -270,19 +284,25 @@ impl SourceUnit for SpreadSheetUnitTask {
                 }
             }
             Ok(())
-        }
+        })
     }
 }
 
 impl MapUnit for SpreadSheetUnitTask {
-    fn compute<'life0, 'async_trait>(&'life0 self, row: Row, ctx: &'life0 Context) -> impl Future<Output=()> + Send
+    fn compute<'life0, 'async_trait>(
+        &'life0 self,
+        row: Row,
+        ctx: &'life0 Context,
+    ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
         'life0: 'async_trait,
         Self: 'async_trait,
     {
-        async move {
+        Ok(async move {
             let mut workbook = self.workbook.lock().expect("fail to obtain workbook");
-            let sheet = workbook.worksheet_from_name(&self.sheet_name).expect("Could not obtain worksheet");
+            let sheet = workbook
+                .worksheet_from_name(&self.sheet_name)
+                .map_err(XlsxErrorWrapper)?;
             if row.offset == 1 {
                 // Add a general heading format.
                 let header_format = Format::new()
@@ -292,7 +312,14 @@ impl MapUnit for SpreadSheetUnitTask {
                     .set_foreground_color(Color::RGB(0xD7E4BC))
                     .set_border(FormatBorder::Thin);
                 for (idx, column) in row.columns.iter().enumerate() {
-                    sheet.write_string_with_format(0u32, idx as u16, column.field.clone(), &header_format).expect("fail to write field names");
+                    sheet
+                        .write_string_with_format(
+                            0u32,
+                            idx as u16,
+                            column.field.clone(),
+                            &header_format,
+                        )
+                        .map_err(XlsxErrorWrapper)?;
                 }
             }
 
@@ -300,29 +327,39 @@ impl MapUnit for SpreadSheetUnitTask {
             for (idx, column) in row.columns.iter().enumerate() {
                 let column_idx = idx as u16;
                 match column.dt.unwrap() {
-                    DataType::unknown => sheet.write(offset, column_idx, None::<String>).expect("fail to write"),
-                    DataType::i32 => sheet.write(offset, column_idx, column.i32_val).expect("fail to write"),
-                    DataType::i64 => sheet.write(offset, column_idx, column.i64_val).expect("fail to write"),
-                    DataType::f32 => sheet.write(offset, column_idx, column.f32_val).expect("fail to write"),
-                    DataType::f64 => sheet.write(offset, column_idx, column.f64_val).expect("fail to write"),
-                    DataType::str => sheet.write(offset, column_idx, column.str_val.clone()).expect("fail to write"),
-                    DataType::bool => sheet.write(offset, column_idx, column.bool_val).expect("fail to write"),
+                    DataType::unknown => sheet.write(offset, column_idx, None::<String>),
+                    DataType::i32 => sheet.write(offset, column_idx, column.i32_val),
+                    DataType::i64 => sheet.write(offset, column_idx, column.i64_val),
+                    DataType::f32 => sheet.write(offset, column_idx, column.f32_val),
+                    DataType::f64 => sheet.write(offset, column_idx, column.f64_val),
+                    DataType::str => sheet.write(offset, column_idx, column.str_val.clone()),
+                    DataType::bool => sheet.write(offset, column_idx, column.bool_val),
                     DataType::bytes => unimplemented!(),
-                    DataType::json => sheet.write(offset, column_idx, column.str_val.clone()).expect("fail to write"),
-                };
+                    DataType::json => sheet.write(offset, column_idx, column.str_val.clone()),
+                }
+                .map_err(XlsxErrorWrapper)?;
             }
-        }
+            Ok(())
+        })
     }
 
-    fn on_eof<'life0, 'async_trait>(&'life0 self, row: Row, ctx: &'life0 Context) -> impl Future<Output=()> + Send
+    fn on_eof<'life0, 'async_trait>(
+        &'life0 self,
+        row: Row,
+        ctx: &'life0 Context,
+    ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
         'life0: 'async_trait,
         Self: 'async_trait,
     {
-        async move {
+        Ok(async move {
             let mut workbook = self.workbook.lock().expect("fail to obtain workbook");
-            let worksheet = workbook.worksheet_from_name(&self.sheet_name).expect("Could not obtain worksheet");
-            worksheet.set_freeze_panes(1, 0).expect("fail to set freeze panes");
+            let worksheet = workbook
+                .worksheet_from_name(&self.sheet_name)
+                .expect("Could not obtain worksheet");
+            worksheet
+                .set_freeze_panes(1, 0)
+                .expect("fail to set freeze panes");
             worksheet.autofit_to_max_width(300);
 
             let properties = DocProperties::new()
@@ -336,8 +373,9 @@ impl MapUnit for SpreadSheetUnitTask {
                 .set_comment("Created with FusionPro");
 
             workbook.set_properties(&properties);
-            workbook.save(self.path.clone()).expect("fail to save");
-        }
+            workbook.save(self.path.clone()).map_err(XlsxErrorWrapper)?;
+            Ok(())
+        })
     }
 }
 
@@ -355,6 +393,15 @@ pub struct DeErrorWrapper(pub DeError);
 
 impl From<DeErrorWrapper> for UnitError {
     fn from(value: DeErrorWrapper) -> Self {
+        UnitError::Unknown(value.0.to_string())
+    }
+}
+
+#[derive(Debug)]
+struct CalamineXlsxErrorWrapper(pub CalamineXlsxError);
+
+impl From<CalamineXlsxErrorWrapper> for UnitError {
+    fn from(value: CalamineXlsxErrorWrapper) -> Self {
         UnitError::Unknown(value.0.to_string())
     }
 }

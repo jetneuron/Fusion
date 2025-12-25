@@ -64,20 +64,24 @@ impl Row {
 impl Display for Row {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let columns = &self.columns;
-        let row_string = columns.iter().map(|c| {
-            let data_type = c.dt.unwrap();
-            match data_type {
-                DataType::i32 => c.i32_val.to_string(),
-                DataType::i64 => c.i64_val.to_string(),
-                DataType::f32 => c.f32_val.to_string(),
-                DataType::f64 => c.f64_val.to_string(),
-                DataType::str => c.str_val.to_string(),
-                DataType::bool => c.bool_val.to_string(),
-                DataType::bytes => String::from_utf8(c.bytes_val.to_vec()).expect("bytes"),
-                DataType::unknown => "null".to_string(),
-                _ => unimplemented!("data type format unimplemented: {:?}", data_type),
-            }
-        }).collect::<Vec<String>>().join("\t");
+        let row_string = columns
+            .iter()
+            .map(|c| {
+                let data_type = c.dt.unwrap();
+                match data_type {
+                    DataType::i32 => c.i32_val.to_string(),
+                    DataType::i64 => c.i64_val.to_string(),
+                    DataType::f32 => c.f32_val.to_string(),
+                    DataType::f64 => c.f64_val.to_string(),
+                    DataType::str => c.str_val.to_string(),
+                    DataType::bool => c.bool_val.to_string(),
+                    DataType::bytes => String::from_utf8(c.bytes_val.to_vec()).expect("bytes"),
+                    DataType::unknown => "null".to_string(),
+                    _ => unimplemented!("data type format unimplemented: {:?}", data_type),
+                }
+            })
+            .collect::<Vec<String>>()
+            .join("\t");
         f.write_str(row_string.as_str())?;
         Ok(())
     }
@@ -107,7 +111,13 @@ impl Display for Column {
 impl Row {
     pub fn display_column_names(&self) {
         let columns = &self.columns;
-        println!("{}", columns.iter().map(|c| c.field.clone())
-            .collect::<Vec<String>>().join("\t"));
+        println!(
+            "{}",
+            columns
+                .iter()
+                .map(|c| c.field.clone())
+                .collect::<Vec<String>>()
+                .join("\t")
+        );
     }
 }

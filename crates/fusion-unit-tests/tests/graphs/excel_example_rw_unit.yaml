@@ -5,7 +5,7 @@ units:
     name: input_node
     type: SpreadSheetUnitTask
     config:
-      path: "/Users/nigel/Workspace/code/nigel/Fusion Pro/graph-units/graph-unit-tests/tests/data/test_skin_attribute_data.xlsx"
+      path: "/Users/nigel/Workspace/code/nigel/Fusion/crates/fusion-unit-tests/tests/data/test_skin_attribute_data.xlsx"
       sheet_name: "Sheet1"
       field_name_row_index: 1
       skip_rows: 3
@@ -14,14 +14,14 @@ units:
     name: output_node
     type: DebugOutputUnitTask
     config:
-      foo2: bar2
-      int_field: 1.32
+      hide_console: true
+      show_report: true
 
   - id: uid3
     name: write_excel
     type: SpreadSheetUnitTask
     config:
-      path: "/Users/nigel/Workspace/code/nigel/Fusion Pro/graph-units/graph-unit-tests/tests/data/test_skin_attribute_data_output.xlsx"
+      path: "/Users/nigel/Workspace/code/nigel/Fusion/target/test_skin_attribute_data_output.xlsx"
       sheet_name: "Sheet1"
       field_name_row_index: 1
       skip_rows: 3

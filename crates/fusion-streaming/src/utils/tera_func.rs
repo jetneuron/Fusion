@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use chrono::{Local, TimeZone, Utc};
-use serde_json::{to_value, Value};
+use serde_json::{Value, to_value};
 use std::collections::HashMap;
 use tera::Result;
 
@@ -23,7 +23,10 @@ pub fn yyyymmdd(args: &HashMap<String, Value>) -> Result<Value> {
 
 pub fn human_time(args: &HashMap<String, Value>) -> Result<Value> {
     let mut copied_args = args.clone();
-    copied_args.insert("fmt".to_string(), Value::String("%Y-%m-%d %H:%M:%S".to_string()));
+    copied_args.insert(
+        "fmt".to_string(),
+        Value::String("%Y-%m-%d %H:%M:%S".to_string()),
+    );
     format_time(&copied_args)
 }
 
@@ -33,20 +36,14 @@ pub fn now(args: &HashMap<String, Value>) -> Result<Value> {
 
 pub fn format_time(args: &HashMap<String, Value>) -> Result<Value> {
     let millis = match args.get("ts") {
-        Some(v) => {
-            v.as_i64().unwrap_or_else(|| now_ts())
-        }
-        None => now_ts()
+        Some(v) => v.as_i64().unwrap_or_else(|| now_ts()),
+        None => now_ts(),
     };
 
     let dt = Local.timestamp_millis_opt(millis).unwrap();
     let fmt = match args.get("fmt") {
-        None => {
-            "%Y%m%d"
-        }
-        Some(fmt) => {
-            fmt.as_str().unwrap_or_else(|| "%Y%m%d")
-        }
+        None => "%Y%m%d",
+        Some(fmt) => fmt.as_str().unwrap_or_else(|| "%Y%m%d"),
     };
     let str = dt.format(fmt).to_string();
     Ok(to_value(str)?)

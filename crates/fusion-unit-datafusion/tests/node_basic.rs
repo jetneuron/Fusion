@@ -3,7 +3,6 @@ use fusion_unit_sdk::graph::types::ComputingUnit;
 use fusion_unit_sdk::runtime::logical::LogicalTask;
 use fusion_unit_sdk::units::dev::create_dev_context;
 use serde_json::json;
-use std::sync::Arc;
 
 #[tokio::test]
 async fn apache_data_fusion_basic_test() {
@@ -27,7 +26,11 @@ async fn apache_data_fusion_basic_test() {
     let logical_task = create_test_unit(unit.clone());
     let context = create_dev_context(unit);
     let context_ptr = Box::into_raw(Box::new(context.0));
-    logical_task.internal_launch(context_ptr).await;
+    logical_task
+        .internal_launch(context_ptr)
+        .expect("fail to launch task")
+        .await
+        .expect("fail to launch");
 
     let mut m = context.1;
     let mut idx = 0;

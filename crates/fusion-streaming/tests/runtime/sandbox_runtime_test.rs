@@ -1,6 +1,6 @@
+use fusion_streaming::runtime::GraphRuntime;
 use fusion_streaming::runtime::plugin::PluginManager;
 use fusion_streaming::runtime::sandbox::SandboxRuntime;
-use fusion_streaming::runtime::GraphRuntime;
 
 #[tokio::test]
 pub async fn test_base_runtime() {
@@ -21,7 +21,11 @@ pub async fn test_base_runtime() {
     // we will transform the description of graph as `LogicalTask`, and then transform as `PhysicalTask`
     // automatic.
     let file = "example_unit.yaml";
-    let graph_path = format!("file://{}/tests/graphs/{}", env!("CARGO_MANIFEST_DIR"), file);
+    let graph_path = format!(
+        "file://{}/tests/graphs/{}",
+        env!("CARGO_MANIFEST_DIR"),
+        file
+    );
     let graph = runtime.create(graph_path);
 
     // execute the physical graph.

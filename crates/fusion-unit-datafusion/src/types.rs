@@ -1,6 +1,9 @@
 use crate::types::FileFormat::{Auto, Csv, Excel, Parquet, Tsv};
 use async_trait::async_trait;
-use datafusion::arrow::array::{ArrayBuilder, BooleanBuilder, Float32Builder, Float64Builder, Int32Builder, Int64Builder, StringBuilder};
+use datafusion::arrow::array::{
+    ArrayBuilder, BooleanBuilder, Float32Builder, Float64Builder, Int32Builder, Int64Builder,
+    StringBuilder,
+};
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::Session;
@@ -43,7 +46,7 @@ impl FromStr for FileFormat {
             "tsv" => Ok(Tsv),
             "parquet" => Ok(Parquet),
             "excel" => Ok(Excel),
-            &_ => Ok(Auto)
+            &_ => Ok(Auto),
         }
     }
 }
@@ -66,62 +69,65 @@ impl MemoryTable {
         let mut inner = MemoryTableInner::default();
         inner.schema = Some(schema);
         Self {
-            inner: Arc::new(Mutex::new(inner))
+            inner: Arc::new(Mutex::new(inner)),
         }
     }
 
     pub(crate) async fn add_row(&self, row: Row) {
         let mut inner = self.inner.lock().unwrap();
-        row.columns.into_iter().enumerate().for_each(|(idx, column)| {
-            if idx >= inner.columns.len() {
-                match column.dt.clone().unwrap() {
-                    DataType::unknown => unreachable!(),
-                    DataType::i32 => inner.columns.push(Box::new(Int32Builder::new())),
-                    DataType::i64 => inner.columns.push(Box::new(Int64Builder::new())),
-                    DataType::f32 => inner.columns.push(Box::new(Float32Builder::new())),
-                    DataType::f64 => inner.columns.push(Box::new(Float64Builder::new())),
-                    DataType::str => inner.columns.push(Box::new(StringBuilder::new())),
-                    DataType::bool => inner.columns.push(Box::new(BooleanBuilder::new())),
-                    DataType::bytes => unimplemented!(),
-                    DataType::json => inner.columns.push(Box::new(StringBuilder::new())),
+        row.columns
+            .into_iter()
+            .enumerate()
+            .for_each(|(idx, column)| {
+                if idx >= inner.columns.len() {
+                    match column.dt.clone().unwrap() {
+                        DataType::unknown => unreachable!(),
+                        DataType::i32 => inner.columns.push(Box::new(Int32Builder::new())),
+                        DataType::i64 => inner.columns.push(Box::new(Int64Builder::new())),
+                        DataType::f32 => inner.columns.push(Box::new(Float32Builder::new())),
+                        DataType::f64 => inner.columns.push(Box::new(Float64Builder::new())),
+                        DataType::str => inner.columns.push(Box::new(StringBuilder::new())),
+                        DataType::bool => inner.columns.push(Box::new(BooleanBuilder::new())),
+                        DataType::bytes => unimplemented!(),
+                        DataType::json => inner.columns.push(Box::new(StringBuilder::new())),
+                    }
                 }
-            }
-            let any_column: &mut dyn Any = inner.columns[idx].as_any_mut();
-            match column.dt.unwrap() {
-                DataType::unknown => {}
-                DataType::i32 => {
-                    let mut s = any_column.downcast_mut::<Int32Builder>().unwrap();
-                    s.append_value(column.i32_val);
+                let any_column: &mut dyn Any = inner.columns[idx].as_any_mut();
+                match column.dt.unwrap() {
+                    DataType::unknown => {}
+                    DataType::i32 => {
+                        let mut s = any_column.downcast_mut::<Int32Builder>().unwrap();
+                        s.append_value(column.i32_val);
+                    }
+                    DataType::i64 => {
+                        let mut s = any_column.downcast_mut::<Int64Builder>().unwrap();
+                        s.append_value(column.i64_val);
+                    }
+                    DataType::f32 => {
+                        let mut s = any_column.downcast_mut::<Float32Builder>().unwrap();
+                        s.append_value(column.f32_val);
+                    }
+                    DataType::f64 => {
+                        let mut s = any_column.downcast_mut::<Float64Builder>().unwrap();
+                        s.append_value(column.f64_val);
+                    }
+                    DataType::str => {
+                        let mut s = any_column.downcast_mut::<StringBuilder>().unwrap();
+                        s.append_value(column.str_val);
+                    }
+                    DataType::bool => {
+                        let mut s = any_column.downcast_mut::<BooleanBuilder>().unwrap();
+                        s.append_value(column.bool_val);
+                    }
+                    DataType::bytes => {
+                        unimplemented!()
+                    }
+                    DataType::json => {
+                        let mut s = any_column.downcast_mut::<StringBuilder>().unwrap();
+                        s.append_value(column.str_val);
+                    }
                 }
-                DataType::i64 => {
-                    let mut s = any_column.downcast_mut::<Int64Builder>().unwrap();
-                    s.append_value(column.i64_val);
-                }
-                DataType::f32 => {
-                    let mut s = any_column.downcast_mut::<Float32Builder>().unwrap();
-                    s.append_value(column.f32_val);
-                }
-                DataType::f64 => {
-                    let mut s = any_column.downcast_mut::<Float64Builder>().unwrap();
-                    s.append_value(column.f64_val);
-                }
-                DataType::str => {
-                    let mut s = any_column.downcast_mut::<StringBuilder>().unwrap();
-                    s.append_value(column.str_val);
-                }
-                DataType::bool => {
-                    let mut s = any_column.downcast_mut::<BooleanBuilder>().unwrap();
-                    s.append_value(column.bool_val);
-                }
-                DataType::bytes => {
-                    unimplemented!()
-                }
-                DataType::json => {
-                    let mut s = any_column.downcast_mut::<StringBuilder>().unwrap();
-                    s.append_value(column.str_val);
-                }
-            }
-        })
+            })
     }
 }
 
@@ -183,28 +189,36 @@ impl ExecutionPlan for MemoryTableExec {
         Vec::new()
     }
 
-    fn with_new_children(self: Arc<Self>, children: Vec<Arc<dyn ExecutionPlan>>) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
+    fn with_new_children(
+        self: Arc<Self>,
+        children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         Ok(self)
     }
 
-    fn execute(&self, partition: usize, context: Arc<TaskContext>) -> datafusion::common::Result<SendableRecordBatchStream> {
+    fn execute(
+        &self,
+        partition: usize,
+        context: Arc<TaskContext>,
+    ) -> datafusion::common::Result<SendableRecordBatchStream> {
         let mut table = self.db.inner.lock().unwrap();
-        let columns = table.columns.iter_mut().enumerate().filter(|(idx, c)| {
-            self.projections.contains(&idx)
-        }).map(|(idx, mut c)| {
-            c.finish()
-        }).collect::<Vec<_>>();
-        let data = vec![RecordBatch::try_new(self.projected_schema.clone(), columns)?];
+        let columns = table
+            .columns
+            .iter_mut()
+            .enumerate()
+            .filter(|(idx, c)| self.projections.contains(&idx))
+            .map(|(idx, mut c)| c.finish())
+            .collect::<Vec<_>>();
+        let data = vec![RecordBatch::try_new(
+            self.projected_schema.clone(),
+            columns,
+        )?];
         Ok(Box::pin(MemoryStream::try_new(data, self.schema(), None)?))
     }
 }
 
 impl MemoryTableExec {
-    fn new(
-        projections: Option<&Vec<usize>>,
-        schema: SchemaRef,
-        db: MemoryTable,
-    ) -> Self {
+    fn new(projections: Option<&Vec<usize>>, schema: SchemaRef, db: MemoryTable) -> Self {
         let mut projection_idx = vec![];
         let schema = match projections {
             Some(columns) => {
@@ -239,7 +253,11 @@ impl MemoryTable {
         projections: Option<&Vec<usize>>,
         schema: SchemaRef,
     ) -> Result<Arc<dyn ExecutionPlan>, datafusion::error::DataFusionError> {
-        Ok(Arc::new(MemoryTableExec::new(projections, schema, self.clone())))
+        Ok(Arc::new(MemoryTableExec::new(
+            projections,
+            schema,
+            self.clone(),
+        )))
     }
 }
 
@@ -258,7 +276,13 @@ impl TableProvider for MemoryTable {
         TableType::Base
     }
 
-    async fn scan(&self, state: &dyn Session, projection: Option<&Vec<usize>>, filters: &[Expr], limit: Option<usize>) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
+    async fn scan(
+        &self,
+        state: &dyn Session,
+        projection: Option<&Vec<usize>>,
+        filters: &[Expr],
+        limit: Option<usize>,
+    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         let schema = self.schema();
         return self.create_physical_plan(projection, schema).await;
     }

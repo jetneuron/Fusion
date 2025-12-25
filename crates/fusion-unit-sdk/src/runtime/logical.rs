@@ -1,12 +1,10 @@
 use crate::graph::types::{ComputingUnit, Context};
 use crate::proto::transfer::Row;
+use crate::runtime::UnitResult;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
-use crate::runtime::UnitResult;
 
-pub trait LogicalExecuteContext {
-}
+pub trait LogicalExecuteContext {}
 
 ///
 /// Logical task which can describe the business node execution.
@@ -21,7 +19,7 @@ pub trait LogicalTask {
     fn internal_launch<'life0, 'async_trait>(
         &'life0 self,
         context: *const Context,
-    ) -> Pin<Box<dyn Future<Output=UnitResult<()>> + Send + 'async_trait>>
+    ) -> anyhow::Result<Pin<Box<dyn Future<Output = UnitResult<()>> + Send + 'async_trait>>>
     where
         'life0: 'async_trait,
         Self: 'async_trait;
@@ -31,15 +29,19 @@ pub trait LogicalTask {
         &'life0 self,
         row: *const Row,
         context: *const Context,
-    ) -> Pin<Box<dyn Future<Output=()> + Send + 'async_trait>>
+    ) -> anyhow::Result<Pin<Box<dyn Future<Output = UnitResult<()>> + Send + 'async_trait>>>
     where
         'life0: 'async_trait,
         Self: 'async_trait;
 
     /// stream event
     fn event<'life0, 'async_trait>(
-        &'life0 self, event_type: i32, ctx: &'life0 Context, row: Row, args: Vec<&dyn std::any::Any>,
-    ) -> Pin<Box<dyn Future<Output=()> + Send + 'async_trait>>
+        &'life0 self,
+        event_type: i32,
+        ctx: &'life0 Context,
+        row: Row,
+        args: Vec<&dyn std::any::Any>,
+    ) -> Pin<Box<dyn Future<Output = UnitResult<()>> + Send + 'async_trait>>
     where
         'life0: 'async_trait,
         Self: 'async_trait;

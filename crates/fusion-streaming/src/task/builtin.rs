@@ -4,8 +4,10 @@ use fusion_derive::{MapLogicTask, SinkLogicTask, SrcLogicTask};
 use fusion_unit_sdk::graph::types::{ComputingUnit, Context, InitUnit, MapUnit, SourceUnit};
 use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
 use fusion_unit_sdk::row::utils::RAW_STR;
+use fusion_unit_sdk::runtime::UnitResult;
 use fusion_unit_sdk::units::compute_unit::UnitCreator;
 use libc::glob;
+use log::{info, warn};
 use mlua::{Function, Lua, Table, UserData, UserDataMethods};
 use protobuf::EnumOrUnknown;
 use rand::Rng;
@@ -14,7 +16,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{Mutex, MutexGuard};
-use fusion_unit_sdk::runtime::UnitResult;
 
 #[derive(Default, SrcLogicTask)]
 pub struct DebugInputUnitTask {
@@ -49,7 +50,10 @@ impl InitUnit for DebugInputUnitTask {
 }
 
 impl SourceUnit for DebugInputUnitTask {
-    fn launch(&self, ctx: Arc<Context>) -> impl Future<Output=UnitResult<()>> + Send {
+    fn launch(
+        &self,
+        ctx: Arc<Context>,
+    ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send> {
         let id = Option::from(&ctx.unit)
             .map(|u| u.get_id().clone())
             .unwrap_or(String::default());
@@ -58,7 +62,7 @@ impl SourceUnit for DebugInputUnitTask {
         let column_count = self.column_count;
         let interval_millis = self.interval;
 
-        async move {
+        Ok(async move {
             for _row_idx in 0..iter_times {
                 let mut row = Row::new();
 
@@ -78,7 +82,7 @@ impl SourceUnit for DebugInputUnitTask {
                 }
             }
             Ok(())
-        }
+        })
     }
 }
 
@@ -88,15 +92,20 @@ pub struct DebugMapUnitTask {}
 impl InitUnit for DebugMapUnitTask {}
 
 impl MapUnit for DebugMapUnitTask {
-    fn compute<'life0, 'async_trait>(&'life0 self, row: Row, ctx: &'life0 Context) -> impl Future<Output=()> + Send
+    fn compute<'life0, 'async_trait>(
+        &'life0 self,
+        row: Row,
+        ctx: &'life0 Context,
+    ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
         'life0: 'async_trait,
         Self: 'async_trait,
     {
         let c = &row.columns;
-        async move {
+        Ok(async move {
             ctx.send(row).await;
-        }
+            Ok(())
+        })
     }
 }
 
@@ -111,7 +120,11 @@ impl InitUnit for MapUnitTask {
         let conf = unit.get_config();
         conf.map(|c| {
             self.script.code = c["script"].as_str().unwrap_or_default().to_string();
-            self.script.script_type = c["type"].as_str().unwrap().parse().unwrap_or(ScriptType::Lua);
+            self.script.script_type = c["type"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap_or(ScriptType::Lua);
 
             match self.script.script_type {
                 ScriptType::Lua => {
@@ -129,14 +142,19 @@ impl MapUnitTask {
 
         let script_code = self.script.code.clone();
         let func_name = FUSION_LUA_FUNC_NAME;
-        let chunk = format!(r#"
+        let chunk = format!(
+            r#"
 function {func_name}(ctx, data)
   {}
   return true
-end"#, script_code.lines().collect::<Vec<&str>>().join("\n  "));
+end"#,
+            script_code.lines().collect::<Vec<&str>>().join("\n  ")
+        );
 
         log::debug!("lua code: {}", &chunk);
-        lua.load(chunk).exec().expect("failed to eval script function");
+        lua.load(chunk)
+            .exec()
+            .expect("failed to eval script function");
         self.lua = Arc::new(Mutex::new(lua));
     }
 
@@ -165,22 +183,26 @@ end"#, script_code.lines().collect::<Vec<&str>>().join("\n  "));
     }
 }
 
-
 impl MapUnit for MapUnitTask {
     fn compute<'life0, 'async_trait>(
         &'life0 self,
         row: Row,
         ctx: &'life0 Context,
-    ) -> Pin<Box<dyn Future<Output=()> + Send + 'async_trait>>
+    ) -> Result<
+        impl Future<Output = Result<(), fusion_unit_sdk::runtime::UnitError>> + Send,
+        anyhow::Error,
+    >
     where
         'life0: 'async_trait,
         Self: 'async_trait,
     {
-        Box::pin(async move {
+        Ok(Box::pin(async move {
             let func = {
                 let lua = self.lua.lock().await;
                 let globals = lua.globals();
-                globals.get::<Function>(FUSION_LUA_FUNC_NAME).expect("concatenate a function")
+                globals
+                    .get::<Function>(FUSION_LUA_FUNC_NAME)
+                    .expect("concatenate a function")
             };
 
             let ctx = LuaContext::wrap(ctx.clone());
@@ -192,7 +214,8 @@ impl MapUnit for MapUnitTask {
                     println!("{}", err);
                 }
             };
-        })
+            Ok(())
+        }))
     }
 }
 
@@ -210,7 +233,6 @@ pub struct DebugOutputUnitTask {
     stats: Arc<Mutex<Stats>>,
 }
 
-
 impl InitUnit for DebugOutputUnitTask {
     fn init(&mut self, unit: ComputingUnit) {
         let conf = unit.get_config();
@@ -221,7 +243,9 @@ impl InitUnit for DebugOutputUnitTask {
         }
     }
 
-    fn on_start<'life0, 'async_trait>(&'life0 self) -> Pin<Box<dyn Future<Output=()> + Send + 'async_trait>>
+    fn on_start<'life0, 'async_trait>(
+        &'life0 self,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'async_trait>>
     where
         'life0: 'async_trait,
         Self: 'async_trait,
@@ -231,14 +255,21 @@ impl InitUnit for DebugOutputUnitTask {
             let now = SystemTime::now();
             let mut stats = stats_arc.lock().await;
             if stats.start_time == 0 {
-                stats.start_time = now.duration_since(UNIX_EPOCH).expect("Time went backwards").as_millis() as u64;
+                stats.start_time = now
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Time went backwards")
+                    .as_millis() as u64;
             }
         })
     }
 }
 
 impl MapUnit for DebugOutputUnitTask {
-    fn compute<'life0, 'async_trait>(&'life0 self, row: Row, ctx: &'life0 Context) -> impl Future<Output=()> + Send
+    fn compute<'life0, 'async_trait>(
+        &'life0 self,
+        row: Row,
+        ctx: &'life0 Context,
+    ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
         'life0: 'async_trait,
         Self: 'async_trait,
@@ -246,36 +277,56 @@ impl MapUnit for DebugOutputUnitTask {
         let hide_header = self.hide_header;
         let hide_console = self.hide_console;
         let stats = self.stats.clone();
-        async move {
+        Ok(async move {
             if !hide_console {
                 let id = ctx.unit.get_id();
                 let offset = row.offset;
                 if offset == 1 && !hide_header {
                     let columns = &row.columns;
-                    let headers = columns.iter()
+                    let headers = columns
+                        .iter()
                         .map(|c| c.field.clone())
                         .collect::<Vec<_>>()
                         .join("\t");
                     if row.mask == RAW_STR {
-                        println!("\x1b[31m[{}->{}]\t#offset\x1b[0m\t{}", &row.source, id, "RAW_STR");
+                        println!(
+                            "\x1b[31m[{}->{}]\t#offset\x1b[0m\t{}",
+                            &row.source, id, "RAW_STR"
+                        );
                     } else {
-                        println!("\x1b[31m[{}->{}]\t#offset\x1b[0m\t{}", &row.source, id, &headers);
+                        println!(
+                            "\x1b[31m[{}->{}]\t#offset\x1b[0m\t{}",
+                            &row.source, id, &headers
+                        );
                     }
                 }
 
                 if row.mask == RAW_STR {
-                    println!("\x1b[31m[{}->{}]\t#{}\x1b[0m\t{}", &row.source, id, offset, String::from_utf8(row.raw.clone()).unwrap());
+                    println!(
+                        "\x1b[31m[{}->{}]\t#{}\x1b[0m\t{}",
+                        &row.source,
+                        id,
+                        offset,
+                        String::from_utf8(row.raw.clone()).unwrap()
+                    );
                 } else {
-                    println!("\x1b[31m[{}->{}]\t#{}\x1b[0m\t{}", &row.source, id, offset, row);
+                    println!(
+                        "\x1b[31m[{}->{}]\t#{}\x1b[0m\t{}",
+                        &row.source, id, offset, row
+                    );
                 }
             }
             stats.lock().await.total += 1;
             ctx.send(row).await;
-        }
+            Ok(())
+        })
     }
 
-
-    fn on_eof<'life0, 'async_trait>(&'life0 self, row: Row, ctx: &'life0 Context) -> impl Future<Output=()> + Send
+    fn on_eof<'life0, 'async_trait>(
+        &'life0 self,
+        row: Row,
+        ctx: &'life0 Context,
+    ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
         'life0: 'async_trait,
         Self: 'async_trait,
@@ -283,15 +334,25 @@ impl MapUnit for DebugOutputUnitTask {
         let show_report = self.show_report;
         let id = ctx.unit.get_id();
         let stats_arc = self.stats.clone();
-        log::info!("\x1b[31m[{}] receive special mask: EOF. FROM [{}]\x1b[0m", id, row.source);
-        async move {
-            let cts = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_millis() as u64;
+
+        #[cfg(feature = "trace-logical")]
+        warn!("[{}] receive special mask: EOF. FROM [{}]", id, row.source);
+
+        Ok(async move {
+            let cts = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_millis() as u64;
             if show_report {
                 let stats = stats_arc.lock().await;
                 let total = stats.total;
                 let elapsed = cts - stats.start_time;
-                log::info!("\x1b[33m[{}] processed total count: [{}]\x1b[0m, elapsed = {}ms", id, total, elapsed);
+                info!(
+                    "task id [{}] finished (EOF), processed rows: [{}], elapsed = {}ms",
+                    id, total, elapsed
+                );
             }
-        }
+            Ok(())
+        })
     }
 }

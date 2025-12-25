@@ -25,7 +25,9 @@ impl ColumnDescriptor {
         infers.into_iter().fold(descriptor, |mut acc, val| {
             let value = val.clone().into();
             if let Ok(v) = i32::from_str(&value) {
-                if v.to_string().eq(&value.to_string()) && DataType::i32.value() <= acc.data_type.value() {
+                if v.to_string().eq(&value.to_string())
+                    && DataType::i32.value() <= acc.data_type.value()
+                {
                     acc.data_type = DataType::i32;
                     return acc;
                 }
@@ -37,7 +39,9 @@ impl ColumnDescriptor {
                 }
             }
             if let Ok(v) = f32::from_str(&value) {
-                if v.to_string().eq(&value.to_string()) && DataType::f32.value() <= acc.data_type.value() {
+                if v.to_string().eq(&value.to_string())
+                    && DataType::f32.value() <= acc.data_type.value()
+                {
                     acc.data_type = DataType::f32;
                     return acc;
                 }
@@ -62,7 +66,10 @@ impl ColumnDescriptor {
 
 #[test]
 fn test_column_descriptor_inference() {
-    let desc = ColumnDescriptor::from("name".to_string(), &vec!["355", "4.52322222222222223222212", "231"]);
+    let desc = ColumnDescriptor::from(
+        "name".to_string(),
+        &vec!["355", "4.52322222222222223222212", "231"],
+    );
     println!("{:?}", desc);
 
     let desc = ColumnDescriptor::from("name".to_string(), &vec!["355", "231", "4.5232"]);

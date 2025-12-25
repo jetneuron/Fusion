@@ -1,7 +1,7 @@
 use crate::graph::core::LogicalGraph;
+use crate::runtime::GraphRuntime;
 use crate::runtime::core::PhysicalGraph;
 use crate::runtime::plugin::PluginManager;
-use crate::runtime::GraphRuntime;
 use crate::utils::tera_func;
 use crate::utils::tera_func::RegisterTeraBuiltinFunc;
 use async_trait::async_trait;
@@ -30,7 +30,11 @@ impl SandboxRuntime {
 impl GraphRuntime for SandboxRuntime {
     fn create<T: Into<LogicalGraph>>(&self, graph: T) -> PhysicalGraph {
         let logical_graph = graph.into();
-        PhysicalGraph { logical_graph, plugin_manager: self.plugin_manager.clone(), graph_lua: Arc::clone(&self.global_lua) }
+        PhysicalGraph {
+            logical_graph,
+            plugin_manager: self.plugin_manager.clone(),
+            graph_lua: Arc::clone(&self.global_lua),
+        }
     }
 
     async fn register_tera_function<F: Function + 'static>(&mut self, name: &str, function: F) {
@@ -42,8 +46,10 @@ impl GraphRuntime for SandboxRuntime {
 #[async_trait]
 impl RegisterTeraBuiltinFunc for SandboxRuntime {
     async fn register_builtin_tera_functions(&mut self) {
-        self.register_tera_function("yyyyMMdd", tera_func::yyyymmdd).await;
-        self.register_tera_function("yyyy_MM_dd", tera_func::yyyy_mm_dd).await;
+        self.register_tera_function("yyyyMMdd", tera_func::yyyymmdd)
+            .await;
+        self.register_tera_function("yyyy_MM_dd", tera_func::yyyy_mm_dd)
+            .await;
         self.register_tera_function("now", tera_func::now).await;
     }
 }

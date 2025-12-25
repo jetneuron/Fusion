@@ -9,9 +9,12 @@ edition.workspace = true
 default = ["all"]
 all = ["common"]
 common = ["http", "excel", "filesystem"]
+trace-all = ["trace-physical", "trace-logical"]
 http = []
 excel = []
 filesystem = []
+trace-physical = []
+trace-logical = []
 
 [dependencies]
 petgraph = "0.6.5"

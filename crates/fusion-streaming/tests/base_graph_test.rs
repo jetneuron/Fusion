@@ -29,7 +29,7 @@ fn graph_serialize_deserialize() {
 
 #[test]
 fn graph_from_file_path() {
-        let graph: LogicalGraph = "file:///Users/nigel/Workspace/code/nigel/Fusion Pro/graph-computing/tests/graphs/example_read_unit.yaml".into();
+    let graph: LogicalGraph = "file:///Users/nigel/Workspace/code/nigel/Fusion Pro/graph-computing/tests/graphs/example_read_unit.yaml".into();
     println!("graph = {:?}", graph);
     println!("graph_json = \n{}", &graph.to_json().unwrap());
     println!("graph_yaml = \n{}", &graph.to_yaml().unwrap());

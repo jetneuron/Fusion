@@ -1,6 +1,6 @@
 use crate::graph::types::ComputingUnit;
-use crate::runtime::logical::LogicalTask;
 use crate::runtime::GLOBAL_REGISTRY;
+use crate::runtime::logical::LogicalTask;
 use std::collections::HashSet;
 use std::hash::Hash;
 
@@ -20,7 +20,7 @@ impl UnitManifest {
         self.unit_provider.insert(key);
     }
 
-    pub fn keys(&self) -> impl Iterator<Item=&String> {
+    pub fn keys(&self) -> impl Iterator<Item = &String> {
         self.unit_provider.iter()
     }
 }

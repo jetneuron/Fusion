@@ -1,6 +1,6 @@
 pub mod test {
-    use tera::{Context, Tera};
     use fusion_streaming::utils::tera_func;
+    use tera::{Context, Tera};
 
     static BIG_TABLE_TEMPLATE: &str = r#"
     [
@@ -32,7 +32,8 @@ pub mod test {
         tera.register_function("yyyy_MM_dd", tera_func::yyyy_mm_dd);
         tera.register_function("humanTime", tera_func::human_time);
         tera.register_function("now", tera_func::now);
-        tera.add_raw_templates(vec![("big-table.html", BIG_TABLE_TEMPLATE)]).unwrap();
+        tera.add_raw_templates(vec![("big-table.html", BIG_TABLE_TEMPLATE)])
+            .unwrap();
         let mut ctx = Context::new();
         ctx.insert("table", &table);
         ctx.insert("str", "=========== String Content ===========");

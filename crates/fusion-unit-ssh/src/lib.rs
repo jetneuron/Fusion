@@ -1,9 +1,10 @@
+use anyhow::bail;
 use fusion_derive::LogicalTask;
 use fusion_unit_sdk::graph::types::{ComputingUnit, Context, InitUnit, MapUnit, SourceUnit};
 use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
 use fusion_unit_sdk::row::types::ColumnDescriptor;
 use fusion_unit_sdk::row::utils::RAW_STR;
-use fusion_unit_sdk::runtime::UnitResult;
+use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
 use protobuf::EnumOrUnknown;
 use ssh2::Session;
@@ -88,7 +89,10 @@ impl InitUnit for SSHUnitTask {
 }
 
 impl SourceUnit for SSHUnitTask {
-    fn launch(&self, ctx: Arc<Context>) -> impl Future<Output=UnitResult<()>> + Send {
+    fn launch(
+        &self,
+        ctx: Arc<Context>,
+    ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send> {
         let session = self.ssh_connect();
         let mut row_fn = self.generate_row_fn();
         let buffer_size = self.buffer_size.unwrap_or(256);
@@ -103,7 +107,9 @@ impl SourceUnit for SSHUnitTask {
             match cloned_shell {
                 None => {}
                 Some(shell) => {
-                    let mut channel = session.channel_session().expect("Fail to create session channel");
+                    let mut channel = session
+                        .channel_session()
+                        .expect("Fail to create session channel");
                     channel.exec(&shell).expect("Fail to exec shell");
 
                     let reader = BufReader::new(channel.clone());
@@ -134,65 +140,67 @@ impl SourceUnit for SSHUnitTask {
                         }
                     }
 
-                    channel.send_eof().expect("Fail to send eof to shell channel");
+                    channel
+                        .send_eof()
+                        .expect("Fail to send eof to shell channel");
                     channel.close().expect("Fail to close shell channel");
                     if channel.eof() {
-                        channel.wait_close().expect("Fail to wait shell channel closed");
+                        channel
+                            .wait_close()
+                            .expect("Fail to wait shell channel closed");
                     }
                 }
             };
         });
-        async move {
+        Ok(async move {
             while let Some(line) = rx.recv().await {
                 let mut row = Row::new();
                 row_fn(&mut row, line);
                 ctx.send(row).await;
             }
             Ok(())
-        }
+        })
     }
 }
 
 impl SSHUnitTask {
     fn generate_row_fn(&self) -> Box<dyn FnMut(&mut Row, String) + Send> {
         let row_fn: Box<dyn FnMut(&mut Row, String) + Send> = match self.separator.clone() {
-            None => {
-                Box::new(move |row: &mut Row, line: String| {
-                    row.mask = RAW_STR;
-                    row.raw = line.as_bytes().to_vec();
-                })
-            }
-            Some(separator) => {
-                match self.field_names.clone() {
-                    None => {
-                        Box::new(move |row: &mut Row, line: String| {
-                            let columns = line.split(separator.as_str()).enumerate().map(|(idx, s)| {
-                                let mut c = Column::new();
-                                c.field = format!("c{}", idx);
-                                c.dt = EnumOrUnknown::from(DataType::str);
-                                c.str_val = s.to_string();
-                                c
-                            }).collect();
-                            row.columns = columns;
+            None => Box::new(move |row: &mut Row, line: String| {
+                row.mask = RAW_STR;
+                row.raw = line.as_bytes().to_vec();
+            }),
+            Some(separator) => match self.field_names.clone() {
+                None => Box::new(move |row: &mut Row, line: String| {
+                    let columns = line
+                        .split(separator.as_str())
+                        .enumerate()
+                        .map(|(idx, s)| {
+                            let mut c = Column::new();
+                            c.field = format!("c{}", idx);
+                            c.dt = EnumOrUnknown::from(DataType::str);
+                            c.str_val = s.to_string();
+                            c
                         })
-                    }
-                    Some(fields) => {
-                        Box::new(move |row: &mut Row, line: String| {
-                            let columns = line.split(&separator)
-                                .collect::<Vec<&str>>()
-                                .iter()
-                                .enumerate()
-                                .map(|(idx, s)| {
-                                    let mut column = Column::new();
-                                    column.field = fields[idx].name.clone();
-                                    column.dt = EnumOrUnknown::from(fields[idx].data_type);
-                                    column
-                                }).collect::<Vec<Column>>();
-                            row.columns = columns;
+                        .collect();
+                    row.columns = columns;
+                }),
+                Some(fields) => Box::new(move |row: &mut Row, line: String| {
+                    let columns = line
+                        .split(&separator)
+                        .collect::<Vec<&str>>()
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, s)| {
+                            let mut column = Column::new();
+                            column.field = fields[idx].name.clone();
+                            column.dt = EnumOrUnknown::from(fields[idx].data_type);
+                            column
                         })
-                    }
-                }
-            }
+                        .collect::<Vec<Column>>();
+                    row.columns = columns;
+                }),
+            },
         };
         row_fn
     }
@@ -212,15 +220,24 @@ impl SSHUnitTask {
                 let private_key = self.private_key.clone().expect("Fail to get private key");
                 let passphrase: Option<&str> = self.passphrase.as_ref().map(String::as_str);
                 if let Some(public_key) = self.public_key.as_ref() {
-                    session.userauth_pubkey_file(&user_name, Some(Path::new(public_key)), Path::new(&private_key), passphrase)
+                    session
+                        .userauth_pubkey_file(
+                            &user_name,
+                            Some(Path::new(public_key)),
+                            Path::new(&private_key),
+                            passphrase,
+                        )
                         .expect("Fail to authenticate user");
                 } else {
-                    session.userauth_pubkey_file(&user_name, None, Path::new(&private_key), passphrase)
+                    session
+                        .userauth_pubkey_file(&user_name, None, Path::new(&private_key), passphrase)
                         .expect("Fail to authenticate user");
                 }
             }
             Some(pwd) => {
-                session.userauth_password(&user_name, pwd).expect("Fail to authenticate");
+                session
+                    .userauth_password(&user_name, pwd)
+                    .expect("Fail to authenticate");
             }
         }
         session
@@ -228,16 +245,36 @@ impl SSHUnitTask {
 }
 
 impl MapUnit for SSHUnitTask {
-    fn compute<'life0, 'async_trait>(&'life0 self, row: Row, ctx: &'life0 Context) -> impl Future<Output=()> + Send
+    fn compute<'life0, 'async_trait>(
+        &'life0 self,
+        row: Row,
+        ctx: &'life0 Context,
+    ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
         'life0: 'async_trait,
         Self: 'async_trait,
     {
         let mut session = self.session.clone().unwrap();
-        let mut channel = session.channel_session().expect("Fail to create session channel");
-        let shell = self.shell.clone().unwrap();
-        async move {
-            channel.exec(&shell).expect("Fail to execute shell in channel");
+        match session.channel_session() {
+            Ok(mut channel) => {
+                let shell = self.shell.clone().unwrap();
+                Ok(async move {
+                    channel.exec(&shell).map_err(SshErrorWrapper)?;
+                    Ok(())
+                })
+            }
+            Err(err) => {
+                bail!("Fail to create session: {}", err);
+            }
         }
+    }
+}
+
+#[derive(Debug)]
+struct SshErrorWrapper(pub ssh2::Error);
+
+impl From<SshErrorWrapper> for UnitError {
+    fn from(value: SshErrorWrapper) -> Self {
+        UnitError::Unknown(value.0.to_string())
     }
 }

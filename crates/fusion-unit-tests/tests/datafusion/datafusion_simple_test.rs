@@ -1,11 +1,6 @@
-use fusion_streaming::runtime::sandbox::SandboxRuntime;
-use fusion_streaming::runtime::GraphRuntime;
+use crate::execute;
 
 #[tokio::test]
-async fn test_simple_datafusion_graph() {
-    // let runtime: dyn GraphRuntime = SandboxRuntime::new();
-    //
-    // let graph = r#""#;
-    //
-    // runtime.create(graph);
+async fn test_datafusion_simple_graph() {
+    execute("datafusion_simple_graph.yaml").await;
 }

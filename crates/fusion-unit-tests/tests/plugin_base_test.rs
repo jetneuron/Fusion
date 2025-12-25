@@ -2,20 +2,20 @@ mod datafusion;
 mod excel;
 mod unit_test;
 
+use fusion_streaming::runtime::GraphRuntime;
 use fusion_streaming::runtime::physical::PhysicalTask;
 use fusion_streaming::runtime::plugin::PluginManager;
 use fusion_streaming::runtime::sandbox::SandboxRuntime;
-use fusion_streaming::runtime::GraphRuntime;
 use fusion_streaming::task::builtin::{DebugInputUnitTask, DebugMapUnitTask, DebugOutputUnitTask};
 use fusion_unit_sdk::graph::types::ComputingUnit;
 use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
 
 use fusion_streaming::utils::tera_func::RegisterTeraBuiltinFunc;
-use libloading::{Library, Symbol};
-use std::ops::Deref;
 use fusion_unit_datafusion::datafusion_unit::DataFusionUnit;
 use fusion_unit_excel::SpreadSheetUnitTask;
 use fusion_unit_ssh::SSHUnitTask;
+use libloading::{Library, Symbol};
+use std::ops::Deref;
 
 #[derive(Default)]
 pub(crate) struct TestPlugin {}
@@ -42,14 +42,20 @@ impl GraphUnitPlugin for TestPlugin {
 
 pub(crate) async fn register_plugin_execute(plugin_paths: Vec<String>, graph: &str) {
     let plugin_manager = PluginManager::new().await;
-    plugin_manager.add_plugin("test", Box::new(TestPlugin::default())).await;
+    plugin_manager
+        .add_plugin("test", Box::new(TestPlugin::default()))
+        .await;
     for path in plugin_paths.iter() {
         plugin_manager.register_plugin(path).await;
     }
     let mut runtime = SandboxRuntime::new(plugin_manager);
     runtime.register_builtin_tera_functions().await;
     let file = graph;
-    let graph_path = format!("file://{}/tests/graphs/{}", env!("CARGO_MANIFEST_DIR"), file);
+    let graph_path = format!(
+        "file://{}/tests/graphs/{}",
+        env!("CARGO_MANIFEST_DIR"),
+        file
+    );
     let graph = runtime.create(graph_path);
 
     // execute the physical graph.
@@ -58,11 +64,17 @@ pub(crate) async fn register_plugin_execute(plugin_paths: Vec<String>, graph: &s
 
 pub(crate) async fn execute(graph: &str) {
     let plugin_manager = PluginManager::new().await;
-    plugin_manager.add_plugin("test", Box::new(TestPlugin::default())).await;
+    plugin_manager
+        .add_plugin("test", Box::new(TestPlugin::default()))
+        .await;
     let mut runtime = SandboxRuntime::new(plugin_manager);
     runtime.register_builtin_tera_functions().await;
     let file = graph;
-    let graph_path = format!("file://{}/tests/graphs/{}", env!("CARGO_MANIFEST_DIR"), file);
+    let graph_path = format!(
+        "file://{}/tests/graphs/{}",
+        env!("CARGO_MANIFEST_DIR"),
+        file
+    );
     let graph = runtime.create(graph_path);
 
     // execute the physical graph.

@@ -23,7 +23,8 @@ pub fn basic_ssh_command() -> Result<(), Box<dyn std::error::Error>> {
     let pub_key = Some(Path::new("<your_pub_key_location>"));
     let priv_key = Path::new("<your_priv_key_location>");
 
-    sess.userauth_pubkey_file(username, pub_key, priv_key, None).unwrap();
+    sess.userauth_pubkey_file(username, pub_key, priv_key, None)
+        .unwrap();
     assert!(sess.authenticated());
 
     if !sess.authenticated() {
@@ -54,7 +55,6 @@ pub fn basic_ssh_command() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-
 #[tokio::test]
 async fn ssh_basic_test() {
     let conf = json!({
@@ -80,10 +80,13 @@ async fn ssh_basic_test() {
             idx += 1;
             println!("{}", row);
         }
-    }.await;
-    logical_task.internal_launch(context_ptr).await;
-
-
+    }
+    .await;
+    logical_task
+        .internal_launch(context_ptr)
+        .expect("fail")
+        .await
+        .expect("fail");
 }
 
 fn create_test_unit(unit: ComputingUnit) -> Box<dyn LogicalTask> {

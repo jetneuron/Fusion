@@ -3,12 +3,12 @@ use std::str::FromStr;
 use redis::Commands;
 
 use crate::storage::connection::ConnectionTrait;
-use crate::storage::types::{ConnectError, IntoDataSource};
 use crate::storage::types::ConnectionPropResult;
 use crate::storage::types::DataSource;
 use crate::storage::types::DataSourceProp;
 use crate::storage::types::DataSourceResult;
 use crate::storage::types::IntoConnectionProp;
+use crate::storage::types::{ConnectError, IntoDataSource};
 
 #[derive(Debug)]
 struct Redis {
@@ -51,9 +51,14 @@ impl<'a> IntoConnectionProp<RedisProp> for &'a str {
 
 /// transfer tuple2 as redis prop
 impl<T> IntoConnectionProp<RedisProp> for (T, u16)
-    where T: Into<String> {
+where
+    T: Into<String>,
+{
     fn into_connection_prop(self) -> ConnectionPropResult<RedisProp> {
-        Ok(RedisProp { host: self.0.into(), port: self.1 })
+        Ok(RedisProp {
+            host: self.0.into(),
+            port: self.1,
+        })
     }
 }
 

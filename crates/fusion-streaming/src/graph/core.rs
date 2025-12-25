@@ -5,7 +5,9 @@ use std::io::Read;
 use petgraph::{Directed, Graph};
 use url::Url;
 
-use fusion_unit_sdk::graph::types::{ComputingEdge, ComputingUnit, GraphDescription, SerializeType};
+use fusion_unit_sdk::graph::types::{
+    ComputingEdge, ComputingUnit, GraphDescription, SerializeType,
+};
 
 pub type PetGraph = Graph<ComputingUnit, ComputingEdge, Directed>;
 

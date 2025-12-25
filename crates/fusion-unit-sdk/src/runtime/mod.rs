@@ -1,5 +1,6 @@
 use crate::graph::types::ComputingUnit;
 use crate::runtime::logical::LogicalTask;
+use anyhow::Error;
 use serde::{Serialize, Serializer};
 use std::any::Any;
 use std::collections::HashMap;
@@ -47,7 +48,6 @@ impl TypeRegistry {
     }
 }
 
-
 #[derive(Debug, thiserror::Error)]
 pub enum UnitError {
     #[error("unknown error: {0}")]
@@ -64,3 +64,9 @@ impl Serialize for UnitError {
 }
 
 pub type UnitResult<T> = Result<T, UnitError>;
+
+impl From<anyhow::Error> for UnitError {
+    fn from(value: Error) -> Self {
+        UnitError::Unknown(value.to_string())
+    }
+}

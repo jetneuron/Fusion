@@ -23,7 +23,14 @@ fn test_listener() -> std::io::Result<()> {
     let fd = socket.as_raw_fd();
     unsafe {
         let reuse: libc::c_int = 1;
-        if libc::setsockopt(fd, libc::SOL_SOCKET, libc::SO_REUSEPORT, &reuse as *const _ as *const libc::c_void, std::mem::size_of_val(&reuse) as libc::socklen_t) != 0 {
+        if libc::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_REUSEPORT,
+            &reuse as *const _ as *const libc::c_void,
+            std::mem::size_of_val(&reuse) as libc::socklen_t,
+        ) != 0
+        {
             return Err(std::io::Error::last_os_error());
         }
     }
@@ -42,6 +49,10 @@ fn test_listener() -> std::io::Result<()> {
     let mut buf = [0; 1024];
     loop {
         let (len, addr) = udp_socket.recv_from(&mut buf)?;
-        println!("Received from {}: {}", addr, String::from_utf8_lossy(&buf[..len]));
+        println!(
+            "Received from {}: {}",
+            addr,
+            String::from_utf8_lossy(&buf[..len])
+        );
     }
 }

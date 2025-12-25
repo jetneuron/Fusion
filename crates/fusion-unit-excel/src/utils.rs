@@ -1,9 +1,9 @@
 use std::fmt::Debug;
 
 use calamine::Data;
-use protobuf::EnumOrUnknown;
 use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
 use fusion_unit_sdk::row::types::ColumnDescriptor;
+use protobuf::EnumOrUnknown;
 
 /// indicate the `end of file` for row data.
 const ROW_MASK_EOF: u32 = 1 << 0;
@@ -20,7 +20,7 @@ const WATERMARK: u32 = 1 << 3;
 ///
 /// ```
 /// use calamine::{open_workbook, Reader, Xlsx};
-/// use graph_unit_sdk::proto::transfer::Row;
+/// use fusion_unit_sdk::proto::transfer::Row;
 /// let path = "<path_to_read>".to_string();
 /// let mut excel: Xlsx<_> = open_workbook(&path)?;
 ///

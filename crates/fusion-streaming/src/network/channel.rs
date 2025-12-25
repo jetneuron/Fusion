@@ -2,7 +2,7 @@ use fusion_unit_sdk::graph::types::{ComputingUnit, Context, Watermark};
 use fusion_unit_sdk::proto::transfer::Row;
 use std::sync::Arc;
 use tokio::sync::broadcast::{Receiver, Sender};
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 
 pub trait TaskChannel {
     fn subscribe(&self) -> Receiver<Row>;

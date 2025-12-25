@@ -1,6 +1,6 @@
 use crate::proto::transfer::Row;
-use crate::runtime::logical::LogicalExecuteContext;
 use crate::runtime::UnitResult;
+use crate::runtime::logical::LogicalExecuteContext;
 use log::warn;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
@@ -204,8 +204,8 @@ pub trait InitUnit {
     fn init(&mut self, unit: ComputingUnit) {}
 
     fn on_start<'life0, 'async_trait>(
-        &'life0 self
-    ) -> Pin<Box<dyn Future<Output=()> + Send + 'async_trait>>
+        &'life0 self,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'async_trait>>
     where
         'life0: 'async_trait,
         Self: 'async_trait,
@@ -215,26 +215,33 @@ pub trait InitUnit {
 }
 
 pub trait SourceUnit: InitUnit {
-    fn launch(&self, ctx: Arc<Context>) -> impl Future<Output=UnitResult<()>> + Send;
+    fn launch(
+        &self,
+        ctx: Arc<Context>,
+    ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>;
 }
 
 pub trait MapUnit: InitUnit {
     /// internal launch source to emit data.
     fn compute<'life0, 'async_trait>(
-        &'life0 self, row: Row, ctx: &'life0 Context,
-    ) -> impl std::future::Future<Output=()> + Send
+        &'life0 self,
+        row: Row,
+        ctx: &'life0 Context,
+    ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
         'life0: 'async_trait,
         Self: 'async_trait;
     /// end of file.
     fn on_eof<'life0, 'async_trait>(
-        &'life0 self, row: Row, ctx: &'life0 Context,
-    ) -> impl std::future::Future<Output=()> + Send
+        &'life0 self,
+        row: Row,
+        ctx: &'life0 Context,
+    ) -> anyhow::Result<impl std::future::Future<Output = UnitResult<()>> + Send>
     where
         'life0: 'async_trait,
         Self: 'async_trait,
     {
-        Box::pin(async move {})
+        Ok(Box::pin(async move { Ok(()) }))
     }
 }
 
@@ -354,9 +361,16 @@ impl BackpressureSender {
 }
 
 impl Context {
-    pub fn new(unit: ComputingUnit, sender: Sender<Row>, watermark: Arc<RwLock<Watermark>>) -> Self {
+    pub fn new(
+        unit: ComputingUnit,
+        sender: Sender<Row>,
+        watermark: Arc<RwLock<Watermark>>,
+    ) -> Self {
         let id = unit.id.clone();
-        Context { unit, sender: BackpressureSender::new(id, sender, watermark) }
+        Context {
+            unit,
+            sender: BackpressureSender::new(id, sender, watermark),
+        }
     }
 
     pub async fn send(&self, row: Row) {

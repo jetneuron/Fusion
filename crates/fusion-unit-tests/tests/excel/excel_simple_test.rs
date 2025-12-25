@@ -1,25 +1,19 @@
 use crate::execute;
 
 #[tokio::test]
-async fn test_datafusion_simple_graph() {
-    execute("datafusion_simple_graph.yaml").await;
-}
-
-#[tokio::test]
 async fn test_simple_excel_graph() {
     execute("excel_example_read_unit.yaml").await
 }
 
 #[tokio::test]
 async fn test_excel_example_rw_unit() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace")).init();
     execute("excel_example_rw_unit.yaml").await
 }
 
 #[tokio::test]
 async fn test_excel_mix_unit() {
-    env_logger::Builder::from_env(env_logger::Env::default()
-        .default_filter_or("trace"))
-        .init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace")).init();
     execute("excel_read_mix_unit.yaml").await
 }
 

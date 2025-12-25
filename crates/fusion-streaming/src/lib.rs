@@ -3,8 +3,8 @@ extern crate serde_derive;
 
 use std::fmt::Debug;
 
-use petgraph::dot::Dot;
 use petgraph::Graph;
+use petgraph::dot::Dot;
 use serde_derive::{Deserialize, Serialize};
 
 mod engine;

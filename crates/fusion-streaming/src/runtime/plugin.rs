@@ -1,4 +1,6 @@
-use crate::task::builtin::{DebugInputUnitTask, DebugMapUnitTask, DebugOutputUnitTask, MapUnitTask};
+use crate::task::builtin::{
+    DebugInputUnitTask, DebugMapUnitTask, DebugOutputUnitTask, MapUnitTask,
+};
 use crate::task::http_unit::HttpUnitTask;
 use fusion_unit_sdk::graph::types::ComputingUnit;
 use fusion_unit_sdk::runtime::logical::LogicalTask;
@@ -59,20 +61,28 @@ impl PluginManager {
 
         let keys = manifest.keys();
         for key in keys {
-            self.plugin_map.lock().await.insert(key.clone(), path.clone());
+            self.plugin_map
+                .lock()
+                .await
+                .insert(key.clone(), path.clone());
         }
     }
 
-    pub async fn create_logical_task(&self, unit: ComputingUnit) -> Option<Box<dyn LogicalTask + Send>> {
+    pub async fn create_logical_task(
+        &self,
+        unit: ComputingUnit,
+    ) -> Option<Box<dyn LogicalTask + Send>> {
         let version = unit.get_version();
         let key = format!("{}#{}", unit.get_type(), version);
 
         let plugin_map = self.plugin_map.lock().await;
-        let plugin_path = plugin_map.get(&key)
+        let plugin_path = plugin_map
+            .get(&key)
             .expect(format!("Could not find plugin in map by key: {}", &key).as_str());
 
         let plugins = self.plugins.lock().await;
-        let plugin = plugins.get(plugin_path)
+        let plugin = plugins
+            .get(plugin_path)
             .expect(format!("Could not found unit provider: {}", key).as_str());
         plugin.create(unit)
     }

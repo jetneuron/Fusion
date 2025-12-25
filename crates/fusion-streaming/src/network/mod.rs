@@ -1,2 +1,2 @@
-pub mod types;
 pub mod channel;
+pub mod types;

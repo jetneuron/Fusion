@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 
 use crate::storage::connection::ConnectionTrait;
-use crate::storage::types::{DataSource, DataSourceId, DataSourceProp, IntoDataSourceId, IntoDataSource};
+use crate::storage::types::{
+    DataSource, DataSourceId, DataSourceProp, IntoDataSource, IntoDataSourceId,
+};
 
 pub struct StorageManager {
     datasources: HashMap<DataSourceId, Box<dyn IntoDataSource<dyn DataSource>>>,
@@ -11,7 +13,7 @@ pub struct StorageManager {
 impl StorageManager {
     pub fn new() -> Self {
         StorageManager {
-            datasources: HashMap::new()
+            datasources: HashMap::new(),
         }
     }
 
@@ -20,7 +22,10 @@ impl StorageManager {
     }
 
     pub fn add_datasource<ID, DATASOURCE_PROP>(&mut self, id: ID, prop: DATASOURCE_PROP)
-        where ID: IntoDataSourceId, DATASOURCE_PROP: DataSourceProp + Clone + 'static {
+    where
+        ID: IntoDataSourceId,
+        DATASOURCE_PROP: DataSourceProp + Clone + 'static,
+    {
         let id = id.into_datasource_id().unwrap();
         // self.datasources.insert(id, Box::new(prop.clone()));
         //println!("{:?}", id);

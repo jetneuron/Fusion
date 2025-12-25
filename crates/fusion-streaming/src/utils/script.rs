@@ -4,7 +4,7 @@ use std::str::FromStr;
 #[derive(Default)]
 pub(crate) enum ScriptType {
     #[default]
-    Lua
+    Lua,
 }
 impl FromStr for ScriptType {
     type Err = ();
@@ -12,7 +12,7 @@ impl FromStr for ScriptType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "lua" => Ok(Lua),
-            &_ => unreachable!()
+            &_ => unreachable!(),
         }
     }
 }

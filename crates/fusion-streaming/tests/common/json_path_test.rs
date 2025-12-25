@@ -1,7 +1,7 @@
 use fusion_streaming::utils::json_util::{JsonParse, JsonRowMapper};
-use jsonpath_rust::path::JsonLike;
 use jsonpath_rust::JsonPath;
-use serde_json::{json, Value};
+use jsonpath_rust::path::JsonLike;
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::str::FromStr;
 
@@ -72,7 +72,10 @@ pub fn test_as_row() {
 
     let mappers = vec![
         JsonRowMapper::new("foo".to_string(), None),
-        JsonRowMapper::new("sub".to_string(), Some("$.baz[*].sub_array[*].s".to_string())),
+        JsonRowMapper::new(
+            "sub".to_string(),
+            Some("$.baz[*].sub_array[*].s".to_string()),
+        ),
         JsonRowMapper::new("bazAge".to_string(), Some("$.baz[*].age".to_string())),
         JsonRowMapper::new("bar".to_string(), None),
         JsonRowMapper::new("bare".to_string(), None),
@@ -83,7 +86,6 @@ pub fn test_as_row() {
         println!("{}", row);
     }
 }
-
 
 /// 从 JSON 提取数据，同时保留父子层级关系
 fn extract_nested_values(json: &Value, path: &str) -> Vec<HashMap<String, String>> {
@@ -112,7 +114,12 @@ fn extract_nested_values(json: &Value, path: &str) -> Vec<HashMap<String, String
 }
 
 /// 递归计算笛卡尔积，保持层级结构
-fn cartesian_product(nested_data: &[Vec<HashMap<String, String>>], depth: usize, current: &mut Vec<HashMap<String, String>>, result: &mut Vec<HashMap<String, String>>) {
+fn cartesian_product(
+    nested_data: &[Vec<HashMap<String, String>>],
+    depth: usize,
+    current: &mut Vec<HashMap<String, String>>,
+    result: &mut Vec<HashMap<String, String>>,
+) {
     if depth == nested_data.len() {
         let mut merged = HashMap::new();
         for row in current.iter() {
@@ -161,7 +168,7 @@ pub fn test() {
         "$.users[*].age",
         "$.users[*].addresses[*].city",
         "$.users[*].addresses[*].zip",
-        "$.orders[*].id"
+        "$.orders[*].id",
     ];
 
     // 提取所有字段的值，同时保持嵌套关系
@@ -175,7 +182,8 @@ pub fn test() {
     cartesian_product(&extracted_values, 0, &mut Vec::new(), &mut final_rows);
 
     // 输出表格
-    let headers: Vec<String> = paths.iter()
+    let headers: Vec<String> = paths
+        .iter()
         .map(|s| {
             // s.replace("$.users[*].", "")
             //     .replace("$.orders[*].", "")
@@ -185,7 +193,10 @@ pub fn test() {
     println!("{}", headers.join("\t"));
 
     for row in final_rows {
-        let row_values: Vec<String> = headers.iter().map(|header| row.get(header).cloned().unwrap_or("".to_string())).collect();
+        let row_values: Vec<String> = headers
+            .iter()
+            .map(|header| row.get(header).cloned().unwrap_or("".to_string()))
+            .collect();
         println!("{}", row_values.join("\t"));
     }
 }

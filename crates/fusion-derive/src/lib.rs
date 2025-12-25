@@ -71,7 +71,7 @@ fn impl_logical_task_trait(ast: &syn::DeriveInput, tp: i32) -> TokenStream {
             fn internal_launch<'life0, 'async_trait>(
                 &'life0 self,
                 context: *const fusion_unit_sdk::graph::types::Context,
-            ) -> ::core::pin::Pin<Box<dyn ::core::future::Future<Output = fusion_unit_sdk::runtime::UnitResult<()>> + ::core::marker::Send + 'async_trait>>
+            ) -> anyhow::Result<::core::pin::Pin<Box<dyn ::core::future::Future<Output = fusion_unit_sdk::runtime::UnitResult<()>> + ::core::marker::Send + 'async_trait>>>
             where
                 'life0: 'async_trait,
                 Self: 'async_trait,
@@ -82,12 +82,12 @@ fn impl_logical_task_trait(ast: &syn::DeriveInput, tp: i32) -> TokenStream {
                     let __self = self;
                     let () = {
                         let unit_id = arc_ctx.unit.get_id().clone();
-                        __self.launch(arc_ctx.clone()).await;
+                        __self.launch(arc_ctx.clone()).expect("internal launch error").await;
                         arc_ctx.send(fusion_unit_sdk::proto::transfer::Row::eof(unit_id)).await;
                     };
                     Ok(())
                });
-               box_pin
+               Ok(box_pin)
             }
         }
     } else {
@@ -95,14 +95,14 @@ fn impl_logical_task_trait(ast: &syn::DeriveInput, tp: i32) -> TokenStream {
             fn internal_launch<'life0, 'async_trait>(
                 &'life0 self,
                 context: *const fusion_unit_sdk::graph::types::Context,
-            ) -> ::core::pin::Pin<Box<dyn ::core::future::Future<Output = fusion_unit_sdk::runtime::UnitResult<()>> + ::core::marker::Send + 'async_trait>>
+            ) -> anyhow::Result<::core::pin::Pin<Box<dyn ::core::future::Future<Output = fusion_unit_sdk::runtime::UnitResult<()>> + ::core::marker::Send + 'async_trait>>>
             where
                 'life0: 'async_trait,
                 Self: 'async_trait,
             {
-                Box::pin(async move {
+                Ok(Box::pin(async move {
                     Ok(())
-                })
+                }))
             }
         }
     }
@@ -113,21 +113,26 @@ fn impl_logical_task_trait(ast: &syn::DeriveInput, tp: i32) -> TokenStream {
                 &'life0 self,
                 row: *const fusion_unit_sdk::proto::transfer::Row,
                 context: *const fusion_unit_sdk::graph::types::Context,
-            ) -> ::core::pin::Pin<Box<dyn ::core::future::Future<Output = ()> + ::core::marker::Send + 'async_trait>>
+            ) -> anyhow::Result<::core::pin::Pin<Box<dyn ::core::future::Future<Output = fusion_unit_sdk::runtime::UnitResult<()>> + ::core::marker::Send + 'async_trait>>>
             where
                 'life0: 'async_trait,
                 Self: 'async_trait,
             {
                 let cloned_row = unsafe {(*row).clone()};
                 let cloned_ctx = unsafe {(*context).clone()};
-                Box::pin(async move {
-                    self.compute(cloned_row, &cloned_ctx).await;
-                })
+                Ok(Box::pin(async move {
+                    match self.compute(cloned_row, &cloned_ctx) {
+                        Ok(f) => f.await,
+                        Err(err) => {
+                            Err(fusion_unit_sdk::runtime::UnitError::Unknown(String::from("compute error")))
+                        }
+                    }
+                }))
             }
         };
 
         eof_callback = quote! {
-            self.on_eof(row, ctx).await;
+            self.on_eof(row, ctx)?.await?
         };
     } else {
         compute_impl_block = quote! {
@@ -135,7 +140,7 @@ fn impl_logical_task_trait(ast: &syn::DeriveInput, tp: i32) -> TokenStream {
                 &'life0 self,
                 row: *const fusion_unit_sdk::proto::transfer::Row,
                 context: *const fusion_unit_sdk::graph::types::Context,
-            ) -> ::core::pin::Pin<Box<dyn ::core::future::Future<Output = ()> + ::core::marker::Send + 'async_trait>>
+            ) -> anyhow::Result<::core::pin::Pin<Box<dyn ::core::future::Future<Output = fusion_unit_sdk::runtime::UnitResult<()>> + ::core::marker::Send + 'async_trait>>>
             where
                 'life0: 'async_trait,
                 Self: 'async_trait,
@@ -176,7 +181,7 @@ fn impl_logical_task_trait(ast: &syn::DeriveInput, tp: i32) -> TokenStream {
                 ctx: &'life0 fusion_unit_sdk::graph::types::Context,
                 row: fusion_unit_sdk::proto::transfer::Row,
                 args: Vec<&dyn std::any::Any>)
-             -> ::core::pin::Pin<Box<dyn ::core::future::Future<Output = ()> + ::core::marker::Send + 'async_trait>>
+             -> ::core::pin::Pin<Box<dyn ::core::future::Future<Output = fusion_unit_sdk::runtime::UnitResult<()>> + ::core::marker::Send + 'async_trait>>
             where
                 'life0: 'async_trait,
                 Self: 'async_trait,
@@ -193,6 +198,7 @@ fn impl_logical_task_trait(ast: &syn::DeriveInput, tp: i32) -> TokenStream {
                         },
                         _ => unreachable!()
                     }
+                    Ok(())
                 })
             }
         }

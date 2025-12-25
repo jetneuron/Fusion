@@ -7,7 +7,6 @@ edition.workspace = true
 
 [dependencies]
 # core graph computing
-fusion-streaming = { path = "../fusion-streaming" }
 # unit sdk
 fusion-unit-sdk = { path = "../fusion-unit-sdk" }
 libloading = "0.8.6"
@@ -16,6 +15,10 @@ serde_json = "1.0.134"
 fusion-unit-datafusion = { path = "../fusion-unit-datafusion" }
 fusion-unit-excel = {path = "../fusion-unit-excel"}
 fusion-unit-ssh = {path = "../fusion-unit-ssh"}
+
+[dependencies.fusion-streaming]
+path = "../fusion-streaming"
+features = ["common"]
 
 [dev-dependencies]
 tokio = "1.42.0"

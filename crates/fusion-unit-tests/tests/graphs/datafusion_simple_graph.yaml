@@ -5,7 +5,7 @@ units:
     name: input_node
     type: SpreadSheetUnitTask
     config:
-      path: "/Users/nigel/Workspace/code/nigel/Fusion Pro/graph-units/graph-unit-tests/tests/data/test_skin_attribute_data.xlsx"
+      path: "/Users/nigel/Workspace/code/nigel/Fusion/crates/fusion-unit-tests/tests/data/test_skin_attribute_data.xlsx"
       sheet_name: "Sheet1"
       field_name_row_index: 1
       skip_rows: 3
@@ -20,18 +20,18 @@ units:
     type: DataFusionUnit
     config:
       sql: |
-        select ups.itemPurchase, ups.debrisNum, ups.skillIdWeight, csv.* from ups, this, csv
+        select ups.itemPurchase, ups.debrisNum, ups.skillIdWeight, csv.*, this.* from ups, this, csv
         where ups.id = this.id
           and this.id = csv.A
       these:
         - name: this
           format: parquet
           paths:
-            - /Users/nigel/Workspace/code/nigel/Fusion Pro/graph-units/graph-unit-datafusion/tests/data/alltypes_plain.parquet
+            - /Users/nigel/Workspace/code/nigel/Fusion/crates/fusion-unit-tests/tests/data/alltypes_plain.parquet
         - name: csv
           format: csv
           paths:
-            - /Users/nigel/Workspace/code/nigel/Fusion Pro/graph-units/graph-unit-tests/tests/data/capitalized_example.csv
+            - /Users/nigel/Workspace/code/nigel/Fusion/crates/fusion-unit-tests/tests/data/capitalized_example.csv
       upstream:
         - name: ups
           source: uid1

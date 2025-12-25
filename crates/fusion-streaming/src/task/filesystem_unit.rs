@@ -1,5 +1,5 @@
-use crate::task::types::TaskCore;
 use crate::task::UnitTask;
+use crate::task::types::TaskCore;
 use fusion_derive::SrcLogicTask;
 use fusion_unit_sdk::graph::types::{ComputingUnit, InitUnit};
 

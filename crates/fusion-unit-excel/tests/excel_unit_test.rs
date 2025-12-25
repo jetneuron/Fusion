@@ -1,4 +1,4 @@
-use calamine::{open_workbook, Error, RangeDeserializerBuilder, Reader, Xlsx};
+use calamine::{Error, RangeDeserializerBuilder, Reader, Xlsx, open_workbook};
 use fusion_unit_sdk::graph::types::ComputingUnit;
 use serde_json::json;
 
