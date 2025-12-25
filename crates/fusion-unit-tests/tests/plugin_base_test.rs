@@ -100,7 +100,7 @@ pub async fn test() {
         println!("registered plugin version: {}", plugin_version);
 
         let unit = ComputingUnit::new("id1", "ExampleSourceUnit");
-        if let Some(instance) = plugin.create(unit) {
+        if let Ok(instance) = plugin.create(unit) {
             let phy_task = PhysicalTask::new(instance);
             println!("created instance");
         }

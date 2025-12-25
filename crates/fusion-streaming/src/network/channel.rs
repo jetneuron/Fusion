@@ -1,4 +1,4 @@
-use fusion_unit_sdk::graph::types::{ComputingUnit, Context, Watermark};
+use fusion_unit_sdk::graph::types::{ComputingUnit, TaskContext, Watermark};
 use fusion_unit_sdk::proto::transfer::Row;
 use std::sync::Arc;
 use tokio::sync::broadcast::{Receiver, Sender};
@@ -10,7 +10,7 @@ pub trait TaskChannel {
 
     fn capture_receiver<T>(&self, recv: Receiver<Row>, consumer: T)
     where
-        T: Fn(Row, Context) + Send + Sync + 'static;
+        T: Fn(Row, TaskContext) + Send + Sync + 'static;
 
     fn listening_feedback(&self, recv: Receiver<Row>, watermark: Arc<RwLock<Watermark>>);
 
@@ -38,7 +38,7 @@ impl TaskChannel for LocalTaskChannel {
 
     fn capture_receiver<T>(&self, mut receiver: Receiver<Row>, consumer: T)
     where
-        T: Fn(Row, Context) + Send + Sync + 'static,
+        T: Fn(Row, TaskContext) + Send + Sync + 'static,
     {
         // let sender = self.internal_channel.0.clone();
         // let ctx = Context::new(ComputingUnit::default(), sender.clone());

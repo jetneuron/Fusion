@@ -1,20 +1,20 @@
 mod utils;
 
 use crate::utils::with_field_names;
-use anyhow::{Error, Result, bail};
+use anyhow::{Context, Error, Result};
 use calamine::{
-    Data, DeError, RangeDeserializerBuilder, Reader, Xlsx, XlsxError as CalamineXlsxError,
-    open_workbook,
+    open_workbook, Data, DeError, RangeDeserializerBuilder, Reader, Xlsx,
+    XlsxError as CalamineXlsxError,
 };
 use fusion_derive::LogicalTask;
 use fusion_unit_sdk::graph::types::{
-    ComputingUnit, Context, InitUnit, MapUnit, SourceUnit, UnitConfig,
+    ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext, UnitConfig,
 };
 use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
 use fusion_unit_sdk::row::types::ColumnDescriptor;
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
-use log::info;
+use log::error;
 use protobuf::{Enum, EnumOrUnknown};
 use rust_xlsxwriter::{
     Color, DocProperties, Format, FormatAlign, FormatBorder, Workbook, Worksheet, XlsxError,
@@ -199,7 +199,7 @@ impl SpreadSheetUnitTask {
 
 impl InitUnit for SpreadSheetUnitTask {
     /// prepare unit configurations.
-    fn init(&mut self, unit: ComputingUnit) {
+    fn init(&mut self, unit: ComputingUnit) -> UnitResult<()> {
         let sink_mode = unit.is_sink();
         // default value
         self.skip_rows = None;
@@ -207,8 +207,11 @@ impl InitUnit for SpreadSheetUnitTask {
         self.field_name_row_index = None;
         self.auto_types = true;
 
-        unit.get_config().map(|c| {
-            self.path = c["path"].as_str().expect("`path` is required.").to_string();
+        unit.get_config().map::<UnitResult<()>, _>(|c| {
+            self.path = c["path"]
+                .as_str()
+                .ok_or_else(|| UnitError::ConfigParseError("path"))?
+                .to_string();
             self.skip_rows = c["skip_rows"].as_u64().or(None);
             self.sheet_name = c["sheet_name"]
                 .as_str()
@@ -219,12 +222,13 @@ impl InitUnit for SpreadSheetUnitTask {
             self.parse_config_field_names(&c);
             if self.field_names.is_none() {
                 if !sink_mode {
-                    match self.parse_field_names_from_excel(c) {
-                        Ok(_) => {}
-                        Err(err) => panic!("error: {}", err),
-                    };
+                    self.parse_field_names_from_excel(c).map_err(|e| {
+                        error!("Failed to parse field names: {:?}", e.to_string());
+                        UnitError::ConfigInvalidate("field name is invalidate")
+                    })?;
                 }
             }
+            Ok(())
         });
 
         if self.field_names.is_some() {
@@ -241,6 +245,7 @@ impl InitUnit for SpreadSheetUnitTask {
             workbook.push_worksheet(worksheet);
             self.workbook = Arc::new(Mutex::new(workbook));
         }
+        Ok(())
     }
 }
 
@@ -248,7 +253,7 @@ impl SourceUnit for SpreadSheetUnitTask {
     /// start to read excel file data. and emit row data one by one.
     fn launch(
         &self,
-        ctx: Arc<Context>,
+        ctx: Arc<TaskContext>,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send> {
         let path = self.path.clone();
         let sheet_name = self.sheet_name.clone();
@@ -292,7 +297,7 @@ impl MapUnit for SpreadSheetUnitTask {
     fn compute<'life0, 'async_trait>(
         &'life0 self,
         row: Row,
-        ctx: &'life0 Context,
+        ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
         'life0: 'async_trait,
@@ -346,7 +351,7 @@ impl MapUnit for SpreadSheetUnitTask {
     fn on_eof<'life0, 'async_trait>(
         &'life0 self,
         row: Row,
-        ctx: &'life0 Context,
+        ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
         'life0: 'async_trait,

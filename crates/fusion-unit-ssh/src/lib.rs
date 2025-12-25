@@ -1,6 +1,6 @@
 use anyhow::bail;
 use fusion_derive::LogicalTask;
-use fusion_unit_sdk::graph::types::{ComputingUnit, Context, InitUnit, MapUnit, SourceUnit};
+use fusion_unit_sdk::graph::types::{ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext};
 use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
 use fusion_unit_sdk::row::types::ColumnDescriptor;
 use fusion_unit_sdk::row::utils::RAW_STR;
@@ -66,7 +66,7 @@ pub struct SSHUnitTask {
 }
 
 impl InitUnit for SSHUnitTask {
-    fn init(&mut self, unit: ComputingUnit) {
+    fn init(&mut self, unit: ComputingUnit) -> UnitResult<()> {
         unit.get_config().map(|c| {
             self.host = c["host"].as_str().unwrap_or("127.0.0.1").to_string();
             self.port = c["port"].as_u64().unwrap_or(22) as u32;
@@ -85,13 +85,14 @@ impl InitUnit for SSHUnitTask {
             let session = self.ssh_connect();
             self.session = Some(session);
         }
+        Ok(())
     }
 }
 
 impl SourceUnit for SSHUnitTask {
     fn launch(
         &self,
-        ctx: Arc<Context>,
+        ctx: Arc<TaskContext>,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send> {
         let session = self.ssh_connect();
         let mut row_fn = self.generate_row_fn();
@@ -248,7 +249,7 @@ impl MapUnit for SSHUnitTask {
     fn compute<'life0, 'async_trait>(
         &'life0 self,
         row: Row,
-        ctx: &'life0 Context,
+        ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
         'life0: 'async_trait,

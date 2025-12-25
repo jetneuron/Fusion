@@ -1,7 +1,7 @@
 use crate::graph::core::{LogicalGraph, PetGraph};
 use crate::runtime::physical::PhysicalTask;
 use crate::runtime::plugin::PluginManager;
-use fusion_unit_sdk::graph::types::{Context, EdgeCondition, EdgeConfig, Watermark};
+use fusion_unit_sdk::graph::types::{TaskContext, EdgeCondition, EdgeConfig, Watermark};
 use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
 use log::{debug, info, log, trace};
 use mlua::ffi::lua;
@@ -196,10 +196,10 @@ impl PhysicalGraph {
 }
 
 pub struct LuaContext {
-    context: Context,
+    context: TaskContext,
 }
 impl LuaContext {
-    pub fn wrap(context: Context) -> Self {
+    pub fn wrap(context: TaskContext) -> Self {
         Self { context }
     }
 }

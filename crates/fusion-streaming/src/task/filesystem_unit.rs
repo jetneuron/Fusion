@@ -1,7 +1,6 @@
-use crate::task::UnitTask;
 use crate::task::types::TaskCore;
-use fusion_derive::SrcLogicTask;
 use fusion_unit_sdk::graph::types::{ComputingUnit, InitUnit};
+use fusion_unit_sdk::runtime::UnitResult;
 
 #[derive(Default)]
 pub struct CsvReaderUnitTask {
@@ -9,7 +8,7 @@ pub struct CsvReaderUnitTask {
 }
 
 impl InitUnit for CsvReaderUnitTask {
-    fn init(&mut self, unit: ComputingUnit) {
+    fn init(&mut self, unit: ComputingUnit) -> UnitResult<()> {
         todo!()
     }
 }

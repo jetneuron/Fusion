@@ -70,19 +70,19 @@ fn impl_logical_task_trait(ast: &syn::DeriveInput, tp: i32) -> TokenStream {
         launch_impl_block = quote! {
             fn internal_launch<'life0, 'async_trait>(
                 &'life0 self,
-                context: *const fusion_unit_sdk::graph::types::Context,
+                context: *const fusion_unit_sdk::graph::types::TaskContext,
             ) -> anyhow::Result<::core::pin::Pin<Box<dyn ::core::future::Future<Output = fusion_unit_sdk::runtime::UnitResult<()>> + ::core::marker::Send + 'async_trait>>>
             where
                 'life0: 'async_trait,
                 Self: 'async_trait,
             {
-                let ctx = unsafe {Box::from_raw(context as *mut fusion_unit_sdk::graph::types::Context)};
+                let ctx = unsafe {Box::from_raw(context as *mut fusion_unit_sdk::graph::types::TaskContext)};
                 let arc_ctx = Arc::new(*ctx);
                 let box_pin = Box::pin(async move {
                     let __self = self;
                     let () = {
                         let unit_id = arc_ctx.unit.get_id().clone();
-                        __self.launch(arc_ctx.clone()).expect("internal launch error").await;
+                        __self.launch(arc_ctx.clone())?.await?;
                         arc_ctx.send(fusion_unit_sdk::proto::transfer::Row::eof(unit_id)).await;
                     };
                     Ok(())
@@ -94,7 +94,7 @@ fn impl_logical_task_trait(ast: &syn::DeriveInput, tp: i32) -> TokenStream {
         launch_impl_block = quote! {
             fn internal_launch<'life0, 'async_trait>(
                 &'life0 self,
-                context: *const fusion_unit_sdk::graph::types::Context,
+                context: *const fusion_unit_sdk::graph::types::TaskContext,
             ) -> anyhow::Result<::core::pin::Pin<Box<dyn ::core::future::Future<Output = fusion_unit_sdk::runtime::UnitResult<()>> + ::core::marker::Send + 'async_trait>>>
             where
                 'life0: 'async_trait,
@@ -112,7 +112,7 @@ fn impl_logical_task_trait(ast: &syn::DeriveInput, tp: i32) -> TokenStream {
             fn internal_compute<'life0, 'async_trait>(
                 &'life0 self,
                 row: *const fusion_unit_sdk::proto::transfer::Row,
-                context: *const fusion_unit_sdk::graph::types::Context,
+                context: *const fusion_unit_sdk::graph::types::TaskContext,
             ) -> anyhow::Result<::core::pin::Pin<Box<dyn ::core::future::Future<Output = fusion_unit_sdk::runtime::UnitResult<()>> + ::core::marker::Send + 'async_trait>>>
             where
                 'life0: 'async_trait,
@@ -139,7 +139,7 @@ fn impl_logical_task_trait(ast: &syn::DeriveInput, tp: i32) -> TokenStream {
             fn internal_compute<'life0, 'async_trait>(
                 &'life0 self,
                 row: *const fusion_unit_sdk::proto::transfer::Row,
-                context: *const fusion_unit_sdk::graph::types::Context,
+                context: *const fusion_unit_sdk::graph::types::TaskContext,
             ) -> anyhow::Result<::core::pin::Pin<Box<dyn ::core::future::Future<Output = fusion_unit_sdk::runtime::UnitResult<()>> + ::core::marker::Send + 'async_trait>>>
             where
                 'life0: 'async_trait,
@@ -161,14 +161,14 @@ fn impl_logical_task_trait(ast: &syn::DeriveInput, tp: i32) -> TokenStream {
     let token_stream = quote! {
         impl fusion_unit_sdk::runtime::logical::LogicalTask for #struct_name {
 
-            fn create(unit: fusion_unit_sdk::graph::types::ComputingUnit) -> Box<dyn fusion_unit_sdk::runtime::logical::LogicalTask + ::core::marker::Send>
+            fn create(unit: fusion_unit_sdk::graph::types::ComputingUnit) -> fusion_unit_sdk::runtime::UnitResult<Box<dyn fusion_unit_sdk::runtime::logical::LogicalTask + ::core::marker::Send>>
             where
                 Self: Sized
             {
                 let mut instance: #struct_name = #struct_name::default();
                 // must impl `InitUnit` trait
-                instance.init(unit);
-                Box::new(instance)
+                instance.init(unit)?;
+                Ok(Box::new(instance))
             }
 
             #launch_impl_block
@@ -178,7 +178,7 @@ fn impl_logical_task_trait(ast: &syn::DeriveInput, tp: i32) -> TokenStream {
             fn event<'life0, 'async_trait>(
                 &'life0 self,
                 event_type: i32,
-                ctx: &'life0 fusion_unit_sdk::graph::types::Context,
+                ctx: &'life0 fusion_unit_sdk::graph::types::TaskContext,
                 row: fusion_unit_sdk::proto::transfer::Row,
                 args: Vec<&dyn std::any::Any>)
              -> ::core::pin::Pin<Box<dyn ::core::future::Future<Output = fusion_unit_sdk::runtime::UnitResult<()>> + ::core::marker::Send + 'async_trait>>

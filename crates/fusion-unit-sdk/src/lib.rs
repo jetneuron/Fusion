@@ -1,6 +1,6 @@
 use crate::graph::types::ComputingUnit;
-use crate::runtime::GLOBAL_REGISTRY;
 use crate::runtime::logical::LogicalTask;
+use crate::runtime::{UnitResult, GLOBAL_REGISTRY};
 use std::collections::HashSet;
 use std::hash::Hash;
 
@@ -9,6 +9,7 @@ pub mod proto;
 pub mod row;
 pub mod runtime;
 pub mod units;
+pub mod error;
 
 #[derive(Default, Clone)]
 pub struct UnitManifest {
@@ -28,7 +29,7 @@ impl UnitManifest {
 pub trait GraphUnitPlugin {
     fn register_units(&self) -> UnitManifest;
 
-    fn create(&self, unit: ComputingUnit) -> Option<Box<dyn LogicalTask + Send>> {
+    fn create(&self, unit: ComputingUnit) -> UnitResult<Box<dyn LogicalTask + Send>> {
         GLOBAL_REGISTRY.create(unit)
     }
 

@@ -16,7 +16,8 @@ pub trait TaskFactoryType: Any + Send + Sync {
 }
 
 pub struct TypeRegistry {
-    pub registry: Mutex<HashMap<String, fn(unit: ComputingUnit) -> Box<dyn LogicalTask + Send>>>,
+    pub registry:
+        Mutex<HashMap<String, fn(unit: ComputingUnit) -> UnitResult<Box<dyn LogicalTask + Send>>>>,
 }
 
 lazy_static::lazy_static! {
@@ -35,10 +36,19 @@ impl TypeRegistry {
         registry.insert(name.to_string(), |unit| T::create(unit));
     }
 
-    pub fn create(&self, unit: ComputingUnit) -> Option<Box<dyn LogicalTask + Send>> {
+    pub fn create(&self, unit: ComputingUnit) -> UnitResult<Box<dyn LogicalTask + Send>> {
         let unit_type_name = unit.get_type();
         let registry = self.registry.lock().unwrap();
-        registry.get(unit_type_name).map(|f| f(unit))
+        let factory = registry.get(unit_type_name);
+        if factory.is_none() {
+            Err(UnitError::Unknown(format!(
+                "Could not find the unit factory for type: {}",
+                unit_type_name
+            )))
+        } else {
+            let func = factory.unwrap();
+            func(unit)
+        }
     }
 
     pub fn clean_and_shrink(&self) {
@@ -52,6 +62,10 @@ impl TypeRegistry {
 pub enum UnitError {
     #[error("unknown error: {0}")]
     Unknown(String),
+    #[error("could not parse config value of [{0}]")]
+    ConfigParseError(&'static str),
+    #[error("business configuration value is invalidate: {0}")]
+    ConfigInvalidate(&'static str),
 }
 
 impl Serialize for UnitError {

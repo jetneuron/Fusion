@@ -1,13 +1,13 @@
 use crate::runtime::PRODUCT_INFO;
 use crate::task::http_unit::UnitMode::Source;
 use fusion_derive::{LogicalTask, SrcLogicTask};
-use fusion_unit_sdk::graph::types::{ComputingUnit, Context, InitUnit, MapUnit, SourceUnit};
+use fusion_unit_sdk::graph::types::{ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext};
 use fusion_unit_sdk::proto::transfer::Row;
 use fusion_unit_sdk::runtime::UnitResult;
 use jsonpath_rust::JsonPath;
 use mlua::Lua;
 use reqwest::{Client, Method};
-use serde_json::{Value, from_str};
+use serde_json::{from_str, Value};
 use std::collections::HashMap;
 use std::future::Future;
 use std::str::FromStr;
@@ -22,13 +22,15 @@ pub struct HttpApiTask {
 }
 
 impl InitUnit for HttpApiTask {
-    fn init(&mut self, unit: ComputingUnit) {}
+    fn init(&mut self, unit: ComputingUnit) -> UnitResult<()> {
+        Ok(())
+    }
 }
 
 impl SourceUnit for HttpApiTask {
     fn launch(
         &self,
-        ctx: Arc<Context>,
+        ctx: Arc<TaskContext>,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send> {
         Ok(async move { Ok(()) })
     }
@@ -64,7 +66,7 @@ impl FromStr for UnitMode {
 }
 
 impl InitUnit for HttpUnitTask {
-    fn init(&mut self, unit: ComputingUnit) {
+    fn init(&mut self, unit: ComputingUnit) -> UnitResult<()> {
         self.client = Client::new();
         self.method = Some(Method::GET);
         self.unit_mode = Some(Source);
@@ -82,13 +84,14 @@ impl InitUnit for HttpUnitTask {
             let unit_mode = c["unit_mode"].as_str().unwrap_or_else(|| "Source");
             self.unit_mode = Some(UnitMode::from_str(unit_mode).unwrap_or(Source));
         });
+        Ok(())
     }
 }
 
 impl SourceUnit for HttpUnitTask {
     fn launch(
         &self,
-        ctx: Arc<Context>,
+        ctx: Arc<TaskContext>,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send> {
         let client = self.client.clone();
         let url_str = self.url.clone();
@@ -164,7 +167,7 @@ impl MapUnit for HttpUnitTask {
     fn compute<'life0, 'async_trait>(
         &'life0 self,
         row: Row,
-        ctx: &'life0 Context,
+        ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
         'life0: 'async_trait,

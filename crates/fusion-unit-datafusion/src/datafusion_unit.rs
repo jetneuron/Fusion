@@ -9,7 +9,7 @@ use datafusion::logical_expr::UserDefinedLogicalNode;
 use datafusion::prelude::*;
 use fusion_derive::LogicalTask;
 use fusion_unit_sdk::graph::types::{
-    ComputingUnit, Context, InitUnit, MapUnit, SourceUnit, UnitConfig,
+    ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext, UnitConfig,
 };
 use fusion_unit_sdk::proto::transfer::{DataType, Row};
 use fusion_unit_sdk::runtime::UnitResult;
@@ -38,7 +38,7 @@ pub struct DataFusionUnit {
 }
 
 impl InitUnit for DataFusionUnit {
-    fn init(&mut self, unit: ComputingUnit) {
+    fn init(&mut self, unit: ComputingUnit) -> UnitResult<()> {
         let conf = unit.get_config();
         conf.map(|c| {
             self.sql = c["sql"].as_str().expect("sql is not string").to_string();
@@ -48,6 +48,7 @@ impl InitUnit for DataFusionUnit {
                 panic!("There is no any tables.");
             }
         });
+        Ok(())
     }
 }
 
@@ -219,7 +220,7 @@ impl DataFusionUnit {
 
     /// send the sql query result row by row to next node
     async fn send_query_result_row_by_row(
-        ctx: &Context,
+        ctx: &TaskContext,
         batches: Vec<RecordBatch>,
         header: Vec<String>,
     ) {
@@ -247,7 +248,7 @@ impl DataFusionUnit {
 impl SourceUnit for DataFusionUnit {
     fn launch(
         &self,
-        ctx: Arc<Context>,
+        ctx: Arc<TaskContext>,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send> {
         let upstream_is_empty = self.upstream.is_empty();
         Ok(async move {
@@ -278,7 +279,7 @@ impl MapUnit for DataFusionUnit {
     fn compute<'life0, 'async_trait>(
         &'life0 self,
         row: Row,
-        _ctx: &'life0 Context,
+        _ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
         'life0: 'async_trait,
@@ -317,7 +318,7 @@ impl MapUnit for DataFusionUnit {
     fn on_eof<'life0, 'async_trait>(
         &'life0 self,
         row: Row,
-        ctx: &'life0 Context,
+        ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
         'life0: 'async_trait,

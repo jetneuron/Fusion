@@ -1,6 +1,6 @@
 use crate::proto::transfer::Row;
-use crate::runtime::UnitResult;
 use crate::runtime::logical::LogicalExecuteContext;
+use crate::runtime::UnitResult;
 use log::warn;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
@@ -201,7 +201,9 @@ impl ComputingEdge {
 }
 
 pub trait InitUnit {
-    fn init(&mut self, unit: ComputingUnit) {}
+    fn init(&mut self, unit: ComputingUnit) -> UnitResult<()> {
+        Ok(())
+    }
 
     fn on_start<'life0, 'async_trait>(
         &'life0 self,
@@ -217,7 +219,7 @@ pub trait InitUnit {
 pub trait SourceUnit: InitUnit {
     fn launch(
         &self,
-        ctx: Arc<Context>,
+        ctx: Arc<TaskContext>,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>;
 }
 
@@ -226,7 +228,7 @@ pub trait MapUnit: InitUnit {
     fn compute<'life0, 'async_trait>(
         &'life0 self,
         row: Row,
-        ctx: &'life0 Context,
+        ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
         'life0: 'async_trait,
@@ -235,7 +237,7 @@ pub trait MapUnit: InitUnit {
     fn on_eof<'life0, 'async_trait>(
         &'life0 self,
         row: Row,
-        ctx: &'life0 Context,
+        ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl std::future::Future<Output = UnitResult<()>> + Send>
     where
         'life0: 'async_trait,
@@ -252,7 +254,7 @@ pub struct Stats {
 
 #[repr(C)]
 #[derive(Clone)]
-pub struct Context {
+pub struct TaskContext {
     pub unit: ComputingUnit,
     pub sender: BackpressureSender,
 }
@@ -360,14 +362,14 @@ impl BackpressureSender {
     }
 }
 
-impl Context {
+impl TaskContext {
     pub fn new(
         unit: ComputingUnit,
         sender: Sender<Row>,
         watermark: Arc<RwLock<Watermark>>,
     ) -> Self {
         let id = unit.id.clone();
-        Context {
+        TaskContext {
             unit,
             sender: BackpressureSender::new(id, sender, watermark),
         }

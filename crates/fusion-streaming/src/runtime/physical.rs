@@ -2,7 +2,7 @@ use crate::network::channel::TaskChannel;
 use crate::runtime::core::{GraphContext, LuaRow};
 use crate::runtime::{EVENT_TYPE_EOF, EVENT_TYPE_START};
 use crate::task::types::{TaskCore, UnitTask};
-use fusion_unit_sdk::graph::types::{ComputingUnit, Context, EdgeCondition, Watermark};
+use fusion_unit_sdk::graph::types::{ComputingUnit, TaskContext, EdgeCondition, Watermark};
 use fusion_unit_sdk::proto::transfer::Row;
 use fusion_unit_sdk::runtime::UnitResult;
 use fusion_unit_sdk::runtime::logical::LogicalTask;
@@ -88,13 +88,13 @@ impl PhysicalTask {
     }
 
     /// on task END-of-FILE event
-    pub async fn on_eof(&self, row: Row, ctx: &Context) -> UnitResult<()> {
+    pub async fn on_eof(&self, row: Row, ctx: &TaskContext) -> UnitResult<()> {
         let logical_task = &self.logical.lock().await;
         logical_task.event(EVENT_TYPE_EOF, ctx, row, vec![]).await
     }
 
     /// on task start event
-    pub async fn on_start(&self, row: Row, ctx: &Context) -> UnitResult<()> {
+    pub async fn on_start(&self, row: Row, ctx: &TaskContext) -> UnitResult<()> {
         let logical_task = &self.logical.lock().await;
         logical_task.event(EVENT_TYPE_START, ctx, row, vec![]).await
     }
@@ -104,7 +104,7 @@ impl PhysicalTask {
     /// ## Parameters
     /// * `row` - data row
     /// * `ctx` - Context
-    pub async fn compute(&self, row: Row, ctx: Context) -> anyhow::Result<()> {
+    pub async fn compute(&self, row: Row, ctx: TaskContext) -> anyhow::Result<()> {
         let logical_task = &self.logical.lock().await;
         let context_ptr = Box::into_raw(Box::new(ctx));
         let row_ptr = Box::into_raw(Box::new(row));
@@ -144,7 +144,7 @@ impl PhysicalTask {
 
                 let self_unit = self_tc.unit.clone().expect("Failed to get unit");
                 let self_sender = (&self_tc.channel.internal_channel.0).clone();
-                Context::new(self_unit, self_sender, watermark)
+                TaskContext::new(self_unit, self_sender, watermark)
             };
 
             let self_logical = cloned_logical.lock().await;
@@ -254,7 +254,7 @@ impl PhysicalTask {
                 )
             };
             let target_id = ch.0.get_id().clone();
-            let context = Context::new(ch.0, ch.1, ch.3.clone());
+            let context = TaskContext::new(ch.0, ch.1, ch.3.clone());
             let internal_sender = ch.2;
             let watermark = ch.3;
             let self_id = receiver.0.clone();

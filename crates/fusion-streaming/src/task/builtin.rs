@@ -1,7 +1,7 @@
 use crate::runtime::core::{LuaContext, LuaRow};
 use crate::utils::script::{Script, ScriptType};
 use fusion_derive::{MapLogicTask, SinkLogicTask, SrcLogicTask};
-use fusion_unit_sdk::graph::types::{ComputingUnit, Context, InitUnit, MapUnit, SourceUnit};
+use fusion_unit_sdk::graph::types::{ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext};
 use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
 use fusion_unit_sdk::row::utils::RAW_STR;
 use fusion_unit_sdk::runtime::UnitResult;
@@ -28,7 +28,7 @@ pub struct DebugInputUnitTask {
 }
 
 impl InitUnit for DebugInputUnitTask {
-    fn init(&mut self, unit: ComputingUnit) {
+    fn init(&mut self, unit: ComputingUnit) -> UnitResult<()> {
         let conf = unit.get_config();
 
         // default value
@@ -46,13 +46,14 @@ impl InitUnit for DebugInputUnitTask {
             // read `interval` definition from config, default is 0, means emit data immediately.
             self.interval = c["interval"].as_u64().unwrap_or_else(|| self.interval);
         });
+        Ok(())
     }
 }
 
 impl SourceUnit for DebugInputUnitTask {
     fn launch(
         &self,
-        ctx: Arc<Context>,
+        ctx: Arc<TaskContext>,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send> {
         let id = Option::from(&ctx.unit)
             .map(|u| u.get_id().clone())
@@ -95,7 +96,7 @@ impl MapUnit for DebugMapUnitTask {
     fn compute<'life0, 'async_trait>(
         &'life0 self,
         row: Row,
-        ctx: &'life0 Context,
+        ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
         'life0: 'async_trait,
@@ -116,7 +117,7 @@ pub struct MapUnitTask {
 }
 
 impl InitUnit for MapUnitTask {
-    fn init(&mut self, unit: ComputingUnit) {
+    fn init(&mut self, unit: ComputingUnit) -> UnitResult<()> {
         let conf = unit.get_config();
         conf.map(|c| {
             self.script.code = c["script"].as_str().unwrap_or_default().to_string();
@@ -132,6 +133,7 @@ impl InitUnit for MapUnitTask {
                 }
             }
         });
+        Ok(())
     }
 }
 
@@ -187,7 +189,7 @@ impl MapUnit for MapUnitTask {
     fn compute<'life0, 'async_trait>(
         &'life0 self,
         row: Row,
-        ctx: &'life0 Context,
+        ctx: &'life0 TaskContext,
     ) -> Result<
         impl Future<Output = Result<(), fusion_unit_sdk::runtime::UnitError>> + Send,
         anyhow::Error,
@@ -234,13 +236,14 @@ pub struct DebugOutputUnitTask {
 }
 
 impl InitUnit for DebugOutputUnitTask {
-    fn init(&mut self, unit: ComputingUnit) {
+    fn init(&mut self, unit: ComputingUnit) -> UnitResult<()> {
         let conf = unit.get_config();
         if let Some(c) = conf {
             self.hide_header = c["hide_header"].as_bool().unwrap_or(false);
             self.hide_console = c["hide_console"].as_bool().unwrap_or(false);
             self.show_report = c["show_report"].as_bool().unwrap_or(false);
         }
+        Ok(())
     }
 
     fn on_start<'life0, 'async_trait>(
@@ -268,7 +271,7 @@ impl MapUnit for DebugOutputUnitTask {
     fn compute<'life0, 'async_trait>(
         &'life0 self,
         row: Row,
-        ctx: &'life0 Context,
+        ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
         'life0: 'async_trait,
@@ -325,7 +328,7 @@ impl MapUnit for DebugOutputUnitTask {
     fn on_eof<'life0, 'async_trait>(
         &'life0 self,
         row: Row,
-        ctx: &'life0 Context,
+        ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
         'life0: 'async_trait,

@@ -3,6 +3,7 @@ use crate::task::builtin::{
 };
 use crate::task::http_unit::HttpUnitTask;
 use fusion_unit_sdk::graph::types::ComputingUnit;
+use fusion_unit_sdk::runtime::UnitResult;
 use fusion_unit_sdk::runtime::logical::LogicalTask;
 use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
 use libloading::{Library, Symbol};
@@ -71,7 +72,7 @@ impl PluginManager {
     pub async fn create_logical_task(
         &self,
         unit: ComputingUnit,
-    ) -> Option<Box<dyn LogicalTask + Send>> {
+    ) -> UnitResult<Box<dyn LogicalTask + Send>> {
         let version = unit.get_version();
         let key = format!("{}#{}", unit.get_type(), version);
 
