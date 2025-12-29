@@ -8,11 +8,10 @@ edition.workspace = true
 [features]
 default = ["all"]
 all = ["common"]
-common = ["http", "excel", "filesystem"]
+common = ["http", "excel"]
 trace-all = ["trace-physical", "trace-logical"]
 http = []
 excel = []
-filesystem = []
 trace-physical = []
 trace-logical = []
 

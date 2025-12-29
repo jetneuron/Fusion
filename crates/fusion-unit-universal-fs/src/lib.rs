@@ -1,7 +1,14 @@
+pub mod core;
+pub mod error;
+
+#[cfg(feature = "local-fs")]
+pub mod local_filesystem;
+
 use fusion_derive::LogicalTask;
 use fusion_unit_sdk::graph::types::{ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext};
 use fusion_unit_sdk::proto::transfer::Row;
 use fusion_unit_sdk::runtime::UnitResult;
+use fusion_unit_sdk::units::config_util::UnitConfigExt;
 use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
 use std::future::Future;
 use std::sync::Arc;
@@ -34,13 +41,14 @@ pub struct UniversalFsUnitTask {
 
 impl InitUnit for UniversalFsUnitTask {
     fn init(&mut self, unit: ComputingUnit) -> UnitResult<()> {
-        unit.get_config().map(|c| {
-            self.uri = c["uri"]
-                .as_str()
-                .expect("uri must be specified")
-                .to_string();
-        });
-        Ok(())
+        unit.get_config()
+            .map::<UnitResult<()>, _>(|c| {
+                self.uri = c.require_string("uri")?;
+                self.formatter = c.extract_string("formatter")?;
+                self.separator = c.extract_string("separator")?;
+                Ok(())
+            })
+            .unwrap_or(Ok(()))
     }
 }
 

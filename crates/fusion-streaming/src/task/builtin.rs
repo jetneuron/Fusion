@@ -3,7 +3,7 @@ use crate::utils::script::{Script, ScriptType};
 use fusion_derive::{MapLogicTask, SinkLogicTask, SrcLogicTask};
 use fusion_unit_sdk::graph::types::{ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext};
 use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
-use fusion_unit_sdk::row::utils::RAW_STR;
+use fusion_unit_sdk::row::types::RAW_STR;
 use fusion_unit_sdk::runtime::UnitResult;
 use fusion_unit_sdk::units::compute_unit::UnitCreator;
 use libc::glob;

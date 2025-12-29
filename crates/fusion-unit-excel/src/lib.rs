@@ -13,6 +13,7 @@ use fusion_unit_sdk::graph::types::{
 use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
 use fusion_unit_sdk::row::types::ColumnDescriptor;
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
+use fusion_unit_sdk::units::config_util::UnitConfigExt;
 use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
 use log::error;
 use protobuf::{Enum, EnumOrUnknown};
@@ -208,23 +209,19 @@ impl InitUnit for SpreadSheetUnitTask {
         self.auto_types = true;
 
         unit.get_config().map::<UnitResult<()>, _>(|c| {
-            self.path = c["path"]
-                .as_str()
-                .ok_or_else(|| UnitError::ConfigParseError("path"))?
-                .to_string();
-            self.skip_rows = c["skip_rows"].as_u64().or(None);
-            self.sheet_name = c["sheet_name"]
-                .as_str()
-                .map(|s| String::from(s))
-                .unwrap_or("Sheet".into());
-            self.auto_types = c["auto_types"].as_bool().unwrap_or(true);
+            self.path = c.require_string("path")?;
+            self.skip_rows = c.extract_u64("skip_rows")?.or(None);
+            self.sheet_name = c
+                .extract_string("sheet_name")?
+                .unwrap_or(String::from("Sheet"));
+            self.auto_types = c.extract_bool("auto_types")?.unwrap_or(true);
 
             self.parse_config_field_names(&c);
             if self.field_names.is_none() {
                 if !sink_mode {
                     self.parse_field_names_from_excel(c).map_err(|e| {
                         error!("Failed to parse field names: {:?}", e.to_string());
-                        UnitError::ConfigInvalidate("field name is invalidate")
+                        UnitError::config_invalidate("field name is invalidate")
                     })?;
                 }
             }

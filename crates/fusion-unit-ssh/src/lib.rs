@@ -3,7 +3,7 @@ use fusion_derive::LogicalTask;
 use fusion_unit_sdk::graph::types::{ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext};
 use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
 use fusion_unit_sdk::row::types::ColumnDescriptor;
-use fusion_unit_sdk::row::utils::RAW_STR;
+use fusion_unit_sdk::row::types::RAW_STR;
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
 use protobuf::EnumOrUnknown;

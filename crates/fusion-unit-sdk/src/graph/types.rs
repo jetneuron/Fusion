@@ -1,6 +1,6 @@
 use crate::proto::transfer::Row;
-use crate::runtime::logical::LogicalExecuteContext;
 use crate::runtime::UnitResult;
+use crate::runtime::logical::LogicalExecuteContext;
 use log::warn;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
@@ -18,11 +18,6 @@ pub struct GraphDescription {}
 
 pub type UnitConfig = Value;
 
-#[derive(Default)]
-pub struct UnitConf {
-    raw: Value,
-}
-
 pub trait EvaluableConf {
     fn eval(&self) -> Option<String>;
 }
@@ -34,21 +29,6 @@ impl EvaluableConf for Value {
         } else {
             self.as_str().map(|s| s.to_string())
         }
-    }
-}
-
-impl UnitConf {
-    pub fn wrap(value: Value) -> UnitConf {
-        UnitConf { raw: value }
-    }
-}
-
-impl Index<&str> for UnitConf {
-    type Output = Value;
-
-    fn index(&self, index: &str) -> &Self::Output {
-        static NULL: Value = Value::Null;
-        self.raw.get(index).unwrap_or(&NULL)
     }
 }
 

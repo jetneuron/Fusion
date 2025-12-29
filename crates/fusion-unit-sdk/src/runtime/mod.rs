@@ -63,9 +63,25 @@ pub enum UnitError {
     #[error("unknown error: {0}")]
     Unknown(String),
     #[error("could not parse config value of [{0}]")]
-    ConfigParseError(&'static str),
+    ConfigParseError(String),
     #[error("business configuration value is invalidate: {0}")]
-    ConfigInvalidate(&'static str),
+    ConfigInvalidate(String),
+    #[error("config `{0}` is required")]
+    ConfigFieldRequired(String),
+}
+
+impl UnitError {
+    pub fn config_invalidate<T: Into<String>>(msg: T) -> Self {
+        Self::ConfigInvalidate(msg.into())
+    }
+
+    pub fn config_parse_error<T: Into<String>>(msg: T) -> Self {
+        Self::ConfigParseError(msg.into())
+    }
+
+    pub fn config_required<T: Into<String>>(msg: T) -> Self {
+        Self::ConfigFieldRequired(msg.into())
+    }
 }
 
 impl Serialize for UnitError {
