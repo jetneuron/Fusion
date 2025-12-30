@@ -8,6 +8,8 @@ pub enum IOError {
     FieldFormatError(String),
     #[error("Configuration invalidate: {0}")]
     ConfigError(String),
+    #[error("Fail to write: {0}")]
+    WriteFailed(String),
 }
 
 impl IOError {

@@ -17,6 +17,7 @@ thiserror = "2.0.17"
 url = "2.5.7"
 
 aladdin-common = { git = "ssh://git@github.com/jetchim/Aladdin.git", branch = "main", package = "aladdin-common"}
+async-trait = "0.1.89"
 
 [features]
 default = ["local-fs"]

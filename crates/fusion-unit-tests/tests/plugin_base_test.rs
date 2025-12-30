@@ -2,10 +2,10 @@ mod datafusion;
 mod excel;
 mod unit_test;
 
-use fusion_streaming::runtime::GraphRuntime;
 use fusion_streaming::runtime::physical::PhysicalTask;
 use fusion_streaming::runtime::plugin::PluginManager;
 use fusion_streaming::runtime::sandbox::SandboxRuntime;
+use fusion_streaming::runtime::GraphRuntime;
 use fusion_streaming::task::builtin::{DebugInputUnitTask, DebugMapUnitTask, DebugOutputUnitTask};
 use fusion_unit_sdk::graph::types::ComputingUnit;
 use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
@@ -14,6 +14,7 @@ use fusion_streaming::utils::tera_func::RegisterTeraBuiltinFunc;
 use fusion_unit_datafusion::datafusion_unit::DataFusionUnit;
 use fusion_unit_excel::SpreadSheetUnitTask;
 use fusion_unit_ssh::SSHUnitTask;
+use fusion_unit_universal_fs::UniversalFsUnitTask;
 use libloading::{Library, Symbol};
 use std::ops::Deref;
 
@@ -36,6 +37,9 @@ impl GraphUnitPlugin for TestPlugin {
 
         // SSH
         SSHUnitTask::register_unit(&mut manifest, self.plugin_version());
+
+        // Universal FS
+        UniversalFsUnitTask::register_unit(&mut manifest, self.plugin_version());
         manifest
     }
 }

@@ -20,7 +20,11 @@ use protobuf::{Enum, EnumOrUnknown};
 use rust_xlsxwriter::{
     Color, DocProperties, Format, FormatAlign, FormatBorder, Workbook, Worksheet, XlsxError,
 };
+use std::fs;
+use std::fs::File;
 use std::future::Future;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 // default row number to infer
@@ -375,6 +379,14 @@ impl MapUnit for SpreadSheetUnitTask {
                 .set_comment("Created with FusionPro");
 
             workbook.set_properties(&properties);
+
+            let path_buf = PathBuf::from_str(self.path.as_str());
+            if let Some(parent) = path_buf.map_err(|err| anyhow::anyhow!(err))?.parent() {
+                if !fs::metadata(parent).is_ok() {
+                    let _ = fs::create_dir_all(self.path.as_str()).is_ok();
+                }
+            };
+
             workbook.save(self.path.clone()).map_err(XlsxErrorWrapper)?;
             Ok(())
         })

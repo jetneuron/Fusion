@@ -24,3 +24,6 @@ Cargo.lock
 **/Cargo.lock
 
 .idea
+
+# unit test case output resource
+crates/fusion-unit-tests/tests/output

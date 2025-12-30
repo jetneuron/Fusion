@@ -1,0 +1,25 @@
+name: example_graph
+
+units:
+  - id: input
+    name: input_node
+    type: UniversalFsUnitTask
+    version: unstable
+    config:
+      uri: file:///Users/nigel/Workspace/code/nigel/Fusion/crates/fusion-unit-tests/tests/data/simple_test_log.log
+      separator: ","
+
+  - id: output
+    name: output
+    type: DebugOutputUnitTask
+    version: builtin
+    config:
+      show_report: true
+
+edges:
+  - id: eid1
+    source: input
+    target: output
+    config:
+      fee: bee
+

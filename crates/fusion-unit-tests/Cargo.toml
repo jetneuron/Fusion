@@ -15,6 +15,7 @@ serde_json = "1.0.134"
 fusion-unit-datafusion = { path = "../fusion-unit-datafusion" }
 fusion-unit-excel = {path = "../fusion-unit-excel"}
 fusion-unit-ssh = {path = "../fusion-unit-ssh"}
+fusion-unit-universal-fs = {path = "../fusion-unit-universal-fs"}
 
 [dependencies.fusion-streaming]
 path = "../fusion-streaming"

@@ -1,6 +1,6 @@
 use crate::proto::transfer::{Column, DataType, Row};
 use crate::row::types::{ColumnDescriptor, IntoColumn};
-use anyhow::{Context, bail};
+use anyhow::{bail, Context};
 use protobuf::EnumOrUnknown;
 
 impl<T: Into<String>> IntoColumn for T {
@@ -52,4 +52,29 @@ impl<T: Into<String>> IntoColumn for T {
 #[allow(clippy::wrong_self_convention)]
 pub trait RawFormatter<T> {
     fn into_row(&self, raw: T) -> anyhow::Result<Row>;
+}
+pub trait RowToString {
+    fn row_to_string(&self, separator: &str) -> anyhow::Result<String>;
+}
+
+impl RowToString for Row {
+    fn row_to_string(&self, separator: &str) -> anyhow::Result<String> {
+        let str = self
+            .columns
+            .iter()
+            .map(|c| match c.dt.unwrap() {
+                DataType::str => c.str_val.clone(),
+                DataType::bool => c.bool_val.to_string(),
+                DataType::f64 => c.f64_val.to_string(),
+                DataType::f32 => c.f32_val.to_string(),
+                DataType::i32 => c.i32_val.to_string(),
+                DataType::i64 => c.i64_val.to_string(),
+                DataType::bytes => String::from_utf8(c.bytes_val.to_vec()).expect("bytes"),
+                DataType::json => c.str_val.clone(),
+                DataType::unknown => unimplemented!("unknown data type: {:?}", c.dt.unwrap()),
+            })
+            .collect::<Vec<String>>()
+            .join(separator);
+        Ok(str)
+    }
 }

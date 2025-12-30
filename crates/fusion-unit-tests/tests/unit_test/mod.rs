@@ -1,6 +1,7 @@
 use crate::execute;
 
 mod ssh_test;
+mod filesystem_test;
 
 #[tokio::test]
 async fn test_excel_example_rw_unit() {

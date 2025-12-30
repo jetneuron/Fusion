@@ -68,6 +68,10 @@ pub enum UnitError {
     ConfigInvalidate(String),
     #[error("config `{0}` is required")]
     ConfigFieldRequired(String),
+    #[error("I/O error: {0}")]
+    IOError(String),
+    #[error("Row format error: {0}")]
+    InvalidateRowFormat(String),
 }
 
 impl UnitError {

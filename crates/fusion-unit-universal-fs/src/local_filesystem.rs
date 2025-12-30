@@ -1,21 +1,44 @@
-use crate::core::{IntoUniversalIO, RowReader, UniversalIO, UniversalIOConfig};
+use crate::core::{IntoUniversalIO, RowReader, RowWriter, UniversalIO, UniversalIOConfig};
 use crate::error::IOError;
+use anyhow::anyhow;
 use fusion_unit_sdk::proto::transfer::Row;
 use fusion_unit_sdk::row::formatter::StrRawFormatter;
-use fusion_unit_sdk::row::utils::RawFormatter;
+use fusion_unit_sdk::row::utils::{RawFormatter, RowToString};
 use fusion_unit_sdk::units::config_util::UnitConfigExt;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
-pub struct LocalFileSystem {
+pub(crate) struct LocalFileSystem {
     path: PathBuf,
     config: UniversalIOConfig,
+    column_separator: String,
+    writer: Option<Arc<Mutex<BufWriter<File>>>>,
 }
 
 impl LocalFileSystem {
     pub fn new(path: PathBuf, config: UniversalIOConfig) -> Self {
-        LocalFileSystem { path, config }
+        let column_separator = config
+            .extract_string("separator")
+            .unwrap_or_default()
+            .unwrap_or_default();
+        let write_mode = config
+            .extract_bool("write_mode")
+            .unwrap_or_default()
+            .unwrap_or_default();
+        let writer = if write_mode {
+            let file = File::create(path.clone()).unwrap();
+            Some(Arc::new(Mutex::new(BufWriter::new(file))))
+        } else {
+            None
+        };
+        LocalFileSystem {
+            path,
+            config,
+            column_separator,
+            writer,
+        }
     }
 }
 
@@ -25,25 +48,33 @@ impl RowReader for LocalFileSystem {
     fn rows(&self) -> anyhow::Result<Self::Reader, IOError> {
         let file = File::open(&self.path).map_err(|e| IOError::OpenError(e.to_string()))?;
         let reader = BufReader::new(file);
-
         let mut formatter = StrRawFormatter::new();
-        let separator = self
-            .config
-            .extract_string("separator")
-            .map_err(|e| {
-                IOError::config_error(format!(
-                    "Could not extract separator from {}: {}",
-                    self.path.display(),
-                    e
-                ))
-            })?
-            .filter(|s| !s.is_empty());
-        if let Some(sep) = separator {
-            formatter = formatter.with_separator(&sep);
+        let separator = &self.column_separator;
+        if !separator.is_empty() {
+            formatter = formatter.with_separator(separator);
         }
-
         let formatter = Box::new(formatter);
         Ok(Box::new(IterableRow { reader, formatter }))
+    }
+}
+
+impl RowWriter for LocalFileSystem {
+    fn write(&self, row: Row) -> Result<(), IOError> {
+        let line = row
+            .row_to_string(&self.column_separator)
+            .map_err(|err| IOError::FieldFormatError(err.to_string()))?;
+        if let Some(writer) = self.writer.as_ref() {
+            let mut mutex_writer = writer
+                .lock()
+                .map_err(|err| IOError::WriteFailed(err.to_string()))?;
+            mutex_writer
+                .write(line.as_bytes())
+                .map_err(|e| IOError::WriteFailed(e.to_string()))?;
+            mutex_writer
+                .write(b"\n")
+                .map_err(|e| IOError::WriteFailed(e.to_string()))?;
+        };
+        Ok(())
     }
 }
 
@@ -60,6 +91,14 @@ impl UniversalIO for LocalFileSystem {
 
     fn iter_rows(&self) -> anyhow::Result<Self::Reader, IOError> {
         self.rows()
+    }
+
+    fn write_row(&self, row: Row) -> anyhow::Result<()> {
+        self.write(row).map_err(|err| anyhow!(err))
+    }
+
+    fn close(&self) -> anyhow::Result<()> {
+        Ok(())
     }
 }
 pub trait IntoIterableRow {
