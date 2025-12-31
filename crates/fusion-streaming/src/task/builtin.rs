@@ -286,21 +286,34 @@ impl MapUnit for DebugOutputUnitTask {
                 let offset = row.offset;
                 if offset == 1 && !hide_header {
                     let columns = &row.columns;
-                    let headers = columns
-                        .iter()
-                        .map(|c| c.field.clone())
-                        .collect::<Vec<_>>()
-                        .join("\t");
+                    let mut headers = String::new();
+                    let mut types = String::new();
+
+                    for column in columns {
+                        headers.push_str(&format!("{}\t", column.field));
+                        types.push_str(&format!(
+                            "{:?}\t",
+                            column.dt.enum_value_or(DataType::unknown)
+                        ));
+                    }
+                    if !headers.is_empty() {
+                        headers.remove(headers.len() - 1);
+                        types.remove(types.len() - 1);
+                    }
                     if row.mask == RAW_STR {
                         println!(
-                            "\x1b[31m[{}->{}]\t#offset\x1b[0m\t{}",
+                            "\x1b[31m[{}->{}]\t#row\x1b[0m\t{}",
                             &row.source, id, "RAW_STR"
                         );
                     } else {
                         println!(
-                            "\x1b[31m[{}->{}]\t#offset\x1b[0m\t{}",
+                            "\x1b[31m[{}->{}]\t#row\x1b[0m\t{}",
                             &row.source, id, &headers
                         );
+                        println!(
+                            "\x1b[31m[{}->{}]\t#type\x1b[0m\t{}",
+                            &row.source, id, &types
+                        )
                     }
                 }
 

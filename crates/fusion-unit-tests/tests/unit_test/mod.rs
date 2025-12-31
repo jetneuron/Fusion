@@ -1,10 +1,11 @@
-use crate::execute;
+use crate::execute_with_env;
+use serde_json::json;
 
-mod ssh_test;
 mod filesystem_test;
+mod ssh_test;
 
 #[tokio::test]
-async fn test_excel_example_rw_unit() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace")).init();
-    execute("example_unit.yaml").await
+async fn test_excel_example_rw_unit() -> anyhow::Result<()> {
+    execute_with_env("example_unit.yaml", Some(json!({"foo": "bar"}))).await?;
+    Ok(())
 }

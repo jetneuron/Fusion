@@ -23,16 +23,16 @@ units:
         select ups.itemPurchase, ups.debrisNum, ups.skillIdWeight, csv.*, this.* from ups, this, csv
         where ups.id = this.id
           and this.id = csv.A
-      these:
+      local:
         - name: this
           format: parquet
           paths:
-            - /Users/nigel/Workspace/code/nigel/Fusion/crates/fusion-unit-tests/tests/data/alltypes_plain.parquet
+            - "{{CARGO_MANIFEST_DIR}}/tests/data/alltypes_plain.parquet"
         - name: csv
           format: csv
           paths:
-            - /Users/nigel/Workspace/code/nigel/Fusion/crates/fusion-unit-tests/tests/data/capitalized_example.csv
-      upstream:
+            - "{{CARGO_MANIFEST_DIR}}/tests/data/capitalized_example.csv"
+      external:
         - name: ups
           source: uid1
 

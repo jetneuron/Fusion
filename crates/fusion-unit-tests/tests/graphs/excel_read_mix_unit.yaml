@@ -28,7 +28,7 @@ units:
     name: excel-input
     type: SpreadSheetUnitTask
     config:
-      path: "/Users/nigel/Workspace/code/nigel/Fusion Pro/graph-computing/tests/test_res/example_data_01.xlsx"
+      path: "{{CARGO_MANIFEST_DIR}}/tests/test_res/example_data_01.xlsx"
       sheet_name: "Sheet1"
       field_names:
         - name: "foo1"

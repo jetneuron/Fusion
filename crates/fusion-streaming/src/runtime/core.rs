@@ -1,8 +1,10 @@
 use crate::graph::core::{LogicalGraph, PetGraph};
 use crate::runtime::physical::PhysicalTask;
 use crate::runtime::plugin::PluginManager;
-use fusion_unit_sdk::graph::types::{TaskContext, EdgeCondition, EdgeConfig, Watermark};
+use fusion_unit_sdk::graph::types::{EdgeCondition, EdgeConfig, TaskContext, Watermark};
 use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
+use fusion_unit_sdk::runtime::{UnitError, UnitResult};
+use itertools::{cloned, Itertools};
 use log::{debug, info, log, trace};
 use mlua::ffi::lua;
 use mlua::{FromLua, Lua, Table, UserData, UserDataMethods, Value};
@@ -12,12 +14,142 @@ use petgraph::graph::NodeIndex;
 use petgraph::visit::{Dfs, IntoNeighborsDirected, NodeRef};
 use protobuf::EnumOrUnknown;
 use serde::Deserializer;
+use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tera::Tera;
+use tera::{Context, Tera};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 use url::form_urlencoded::parse;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LaunchEnv {
+    params: Option<serde_json::Value>,
+    env: Option<serde_json::Value>,
+}
+
+impl LaunchEnv {
+    pub fn as_tera_context(&self) -> Context {
+        let mut context = Context::new();
+        if let Some(serde_json::Value::Object(map)) = self.params.clone() {
+            for (k, v) in map {
+                if let serde_json::Value::String(str) = v {
+                    context.insert(k, &str);
+                }
+            }
+        };
+        if let Some(serde_json::Value::Object(map)) = self.env.clone() {
+            for (k, v) in map {
+                if let serde_json::Value::String(str) = v {
+                    context.insert(k, &str);
+                }
+            }
+        }
+        context
+    }
+
+    pub fn update_params(&mut self, params: Option<serde_json::Value>) {
+        self.params = params;
+    }
+
+    pub fn update_env(&mut self, env: Option<serde_json::Value>) {
+        self.env = env;
+    }
+
+    pub async fn runtime_env(&mut self, tera: Arc<Mutex<Tera>>) -> UnitResult<()> {
+        let before_env = self.env.clone();
+        if let Some(serde_json::Value::Object(map)) = before_env {
+            let runtime = Self::calculate_runtime(tera, map).await?;
+            self.env = Some(runtime);
+        }
+        Ok(())
+    }
+
+    pub async fn runtime_params(&mut self, tera: Arc<Mutex<Tera>>) -> UnitResult<()> {
+        let before_params = self.params.clone();
+        if let Some(serde_json::Value::Object(map)) = before_params {
+            let runtime = Self::calculate_runtime(tera, map).await?;
+            self.params = Some(runtime);
+        }
+        Ok(())
+    }
+
+    async fn calculate_runtime(
+        tera: Arc<Mutex<Tera>>,
+        map: serde_json::map::Map<String, serde_json::Value>,
+    ) -> Result<serde_json::Value, UnitError> {
+        let mut runtime = serde_json::Value::default();
+        for (key, value) in map {
+            match value {
+                serde_json::Value::Null => {}
+                serde_json::Value::Bool(val) => runtime[key] = serde_json::Value::Bool(val),
+                serde_json::Value::Number(num) => runtime[key] = serde_json::Value::from(num),
+                serde_json::Value::String(str) => {
+                    let mut tera = tera.lock().await;
+                    let runtime_value =
+                        tera.render_str(&str, &tera::Context::new())
+                            .map_err(|err| {
+                                UnitError::config_parse_error(format!(
+                                    "Fail to parse env runtime: {}, origin_value = {}, err = {}",
+                                    key,
+                                    str,
+                                    err.to_string()
+                                ))
+                            })?;
+                    runtime[key] = serde_json::Value::from(runtime_value);
+                }
+                serde_json::Value::Array(arr) => {
+                    runtime[key] = serde_json::Value::Array(arr);
+                }
+                serde_json::Value::Object(obj) => {
+                    runtime[key] = serde_json::Value::Object(obj);
+                }
+            };
+        }
+        Ok(runtime)
+    }
+
+    pub fn merge(mut self, other: Option<LaunchEnv>) -> LaunchEnv {
+        if let Some(other) = other {
+            if let Some(params) = other.params {
+                let after_merged = match self.params {
+                    None => params,
+                    Some(mut exists_params) => {
+                        Self::merge_values(&mut exists_params, params);
+                        exists_params
+                    }
+                };
+                self.params = Some(after_merged);
+            }
+            if let Some(env) = other.env {
+                let after_merged = match self.env {
+                    None => env,
+                    Some(mut exists_env) => {
+                        Self::merge_values(&mut exists_env, env);
+                        exists_env
+                    }
+                };
+                self.env = Some(after_merged);
+            }
+        }
+        self
+    }
+
+    fn merge_values(a: &mut serde_json::Value, b: serde_json::Value) {
+        match (a, b) {
+            (serde_json::Value::Object(a), serde_json::Value::Object(b)) => {
+                for (k, v) in b {
+                    if let Some(existing) = a.get_mut(&k) {
+                        Self::merge_values(existing, v);
+                    } else {
+                        a.insert(k, v);
+                    }
+                }
+            }
+            (a, b) => *a = b,
+        }
+    }
+}
 
 #[derive(Default)]
 pub(crate) struct GraphContext {
@@ -29,6 +161,7 @@ pub struct PhysicalGraph {
     pub(crate) logical_graph: LogicalGraph,
     pub(crate) plugin_manager: Arc<Mutex<PluginManager>>,
     pub(crate) graph_lua: Arc<Mutex<Lua>>,
+    pub(crate) tera: Arc<Mutex<Tera>>,
 }
 
 impl PhysicalGraph {
@@ -36,23 +169,38 @@ impl PhysicalGraph {
         logical_graph: LogicalGraph,
         plugin_manager: Arc<Mutex<PluginManager>>,
         graph_lua: Arc<Mutex<Lua>>,
+        tera: Arc<Mutex<Tera>>,
     ) -> Self {
         PhysicalGraph {
             logical_graph,
             plugin_manager,
             graph_lua,
+            tera,
         }
     }
 
-    pub async fn execute(&self) {
-        #[cfg(feature = "trace-logical")]
-        trace!("Prepare transfer logical graph as pet graph");
-        let pet_graph: PetGraph = (&self.logical_graph).clone().into();
-        #[cfg(feature = "trace-logical")]
-        trace!("{}", self.logical_graph.to_yaml().unwrap());
+    pub async fn execute(&self, launch_env: Option<LaunchEnv>) -> UnitResult<()> {
+        let mut runtime_launch_env = if let Some(env) = self.logical_graph.env.clone() {
+            env.merge(launch_env)
+        } else {
+            launch_env.unwrap_or_default()
+        };
+        runtime_launch_env.runtime_env(self.tera.clone()).await?;
+        runtime_launch_env.runtime_params(self.tera.clone()).await?;
 
+        #[cfg(feature = "trace-physical")]
+        debug!("launch_env: {}", json!(runtime_launch_env).to_string());
+
+        #[cfg(feature = "trace-logical")]
+        {
+            trace!("Prepare transfer logical graph as pet graph");
+            trace!("{}", self.logical_graph.to_yaml().unwrap());
+        }
+
+        let mut pet_graph: PetGraph = (&self.logical_graph).clone().into();
         let mut context = GraphContext::default();
         context.lua = Arc::clone(&self.graph_lua);
+
         let graph_context = Arc::new(Mutex::new(context));
 
         let start_nodes: Vec<NodeIndex> = pet_graph
@@ -65,6 +213,7 @@ impl PhysicalGraph {
 
         let mut physical_map = HashMap::new();
         let indices = pet_graph.node_indices();
+        let tera_context = runtime_launch_env.as_tera_context();
         for index in indices {
             let outgoing_count = pet_graph
                 .neighbors_directed(index, petgraph::Direction::Outgoing)
@@ -73,30 +222,31 @@ impl PhysicalGraph {
                 .neighbors_directed(index, petgraph::Direction::Incoming)
                 .count();
 
-            if let Some(unit) = pet_graph.node_weight(index) {
+            if let Some(mut unit) = pet_graph.node_weight_mut(index) {
                 let unit_id = unit.get_id();
                 let unit_type = unit.get_type();
                 #[cfg(feature = "trace-physical")]
                 trace!(
                     "Initialize physical, id[{unit_id}], type={unit_type}, incoming={incoming_count}, outgoing={outgoing_count}"
                 );
-                let r#type = unit.get_type();
-                let version = unit.get_version();
 
-                let create_result = {
+                let logical_task = {
                     let mgr = self.plugin_manager.lock().await;
-                    let mut unit_hold_by_logical = unit.clone();
-                    unit_hold_by_logical.update_neighbors(outgoing_count, incoming_count);
-                    mgr.create_logical_task(unit_hold_by_logical).await
-                };
+                    unit.update_neighbors(outgoing_count, incoming_count);
 
-                let logical_task = create_result.expect(
-                    format!(
-                        "Could not create logical task, type = {}, version = {}",
-                        r#type, version
-                    )
-                    .as_str(),
-                );
+                    if let Some(conf) = unit.get_config() {
+                        let runtime_config = crate::utils::context_var_util::calculate_runtime(
+                            self.tera.clone(),
+                            tera_context.clone(),
+                            conf,
+                        )
+                        .await?;
+                        unit.replace_config(runtime_config);
+                    }
+
+                    let cloned_unit = unit.clone();
+                    mgr.create_logical_task(cloned_unit).await?
+                };
 
                 let watermark = {
                     // todo: estimate the watermark level
@@ -192,6 +342,7 @@ impl PhysicalGraph {
             "Execute graph had been finished. Elapsed {}ms",
             clock.elapsed().as_millis()
         );
+        Ok(())
     }
 }
 
@@ -209,7 +360,7 @@ impl UserData for LuaContext {
         methods.add_async_method_mut("send", |lua, mut this, row: LuaRow| async move {
             let row = row.row.lock().await;
             let cloned_row = row.clone();
-            &this.context.send(cloned_row).await;
+            this.context.send(cloned_row).await;
             Ok(())
         });
 

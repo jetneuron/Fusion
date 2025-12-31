@@ -13,13 +13,15 @@ libloading = "0.8.6"
 serde_json = "1.0.134"
 # unit extension plugins.
 fusion-unit-datafusion = { path = "../fusion-unit-datafusion" }
-fusion-unit-excel = {path = "../fusion-unit-excel"}
-fusion-unit-ssh = {path = "../fusion-unit-ssh"}
-fusion-unit-universal-fs = {path = "../fusion-unit-universal-fs"}
+fusion-unit-excel = { path = "../fusion-unit-excel" }
+fusion-unit-ssh = { path = "../fusion-unit-ssh" }
+fusion-unit-universal-fs = { path = "../fusion-unit-universal-fs" }
+anyhow = "1.0.100"
+log = "0.4.29"
 
 [dependencies.fusion-streaming]
 path = "../fusion-streaming"
-features = ["common"]
+features = ["common", "trace-physical"]
 
 [dev-dependencies]
 tokio = "1.42.0"

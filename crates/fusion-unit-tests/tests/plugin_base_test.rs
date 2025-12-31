@@ -10,12 +10,14 @@ use fusion_streaming::task::builtin::{DebugInputUnitTask, DebugMapUnitTask, Debu
 use fusion_unit_sdk::graph::types::ComputingUnit;
 use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
 
+use fusion_streaming::runtime::core::LaunchEnv;
 use fusion_streaming::utils::tera_func::RegisterTeraBuiltinFunc;
 use fusion_unit_datafusion::datafusion_unit::DataFusionUnit;
 use fusion_unit_excel::SpreadSheetUnitTask;
 use fusion_unit_ssh::SSHUnitTask;
 use fusion_unit_universal_fs::UniversalFsUnitTask;
 use libloading::{Library, Symbol};
+use serde_json::{json, Value};
 use std::ops::Deref;
 
 #[derive(Default)]
@@ -44,7 +46,10 @@ impl GraphUnitPlugin for TestPlugin {
     }
 }
 
-pub(crate) async fn register_plugin_execute(plugin_paths: Vec<String>, graph: &str) {
+pub(crate) async fn register_plugin_execute(
+    plugin_paths: Vec<String>,
+    graph: &str,
+) -> anyhow::Result<()> {
     let plugin_manager = PluginManager::new().await;
     plugin_manager
         .add_plugin("test", Box::new(TestPlugin::default()))
@@ -63,10 +68,22 @@ pub(crate) async fn register_plugin_execute(plugin_paths: Vec<String>, graph: &s
     let graph = runtime.create(graph_path);
 
     // execute the physical graph.
-    graph.execute().await;
+    graph.execute(None).await?;
+    Ok(())
 }
 
-pub(crate) async fn execute(graph: &str) {
+pub(crate) async fn execute_with_env(graph: &str, params: Option<Value>) -> anyhow::Result<()> {
+    let mut launch_env = LaunchEnv::default();
+    launch_env.update_params(params);
+    launch_env.update_env(Some(json!({
+        "SANDBOX": true,
+        "LAUNCH_TIME": "{{ time() }}",
+        "CARGO_MANIFEST_DIR": env!("CARGO_MANIFEST_DIR"),
+    })));
+
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("error"))
+        .filter_module("fusion", log::LevelFilter::Trace)
+        .init();
     let plugin_manager = PluginManager::new().await;
     plugin_manager
         .add_plugin("test", Box::new(TestPlugin::default()))
@@ -82,7 +99,12 @@ pub(crate) async fn execute(graph: &str) {
     let graph = runtime.create(graph_path);
 
     // execute the physical graph.
-    graph.execute().await;
+    graph.execute(Some(launch_env)).await?;
+    Ok(())
+}
+
+pub(crate) async fn execute(graph: &str) -> anyhow::Result<()> {
+    execute_with_env(graph, None).await
 }
 
 #[tokio::test]

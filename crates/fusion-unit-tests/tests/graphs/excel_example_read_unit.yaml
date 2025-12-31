@@ -5,7 +5,7 @@ units:
     name: input_node
     type: SpreadSheetUnitTask
     config:
-      path: "/Users/nigel/Workspace/code/nigel/Fusion Pro/graph-units/graph-unit-tests/tests/data/test_skin_attribute_data.xlsx"
+      path: "{{CARGO_MANIFEST_DIR}}/tests/data/test_skin_attribute_data.xlsx"
       sheet_name: "Sheet1"
       field_name_row_index: 1
       skip_rows: 3

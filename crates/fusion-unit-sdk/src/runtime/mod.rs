@@ -68,13 +68,23 @@ pub enum UnitError {
     ConfigInvalidate(String),
     #[error("config `{0}` is required")]
     ConfigFieldRequired(String),
-    #[error("I/O error: {0}")]
+    #[error("Unit IO error, cause by: {0}")]
     IOError(String),
     #[error("Row format error: {0}")]
     InvalidateRowFormat(String),
+    #[error("Panic occur in physical task: {0}")]
+    PhysicalTaskErr(String),
 }
 
 impl UnitError {
+    pub fn unknown<T: Into<String>>(msg: T) -> Self {
+        Self::Unknown(msg.into())
+    }
+
+    pub fn physical_error<T: Into<String>>(msg: T) -> Self {
+        Self::PhysicalTaskErr(msg.into())
+    }
+
     pub fn config_invalidate<T: Into<String>>(msg: T) -> Self {
         Self::ConfigInvalidate(msg.into())
     }

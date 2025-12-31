@@ -20,19 +20,19 @@ units:
     type: DataFusionUnit
     config:
       sql: |
-        select ups.itemPurchase, ups.debrisNum, ups.skillIdWeight, csv.*, this.* from ups, this, csv
+        select ups.itemPurchase, ups.debrisNum, ups.skillIdWeight, tsv.*, this.* from ups, this, tsv
         where ups.id = this.id
-          and this.id = csv.A
-      these:
+          and this.id = tsv.A
+      local:
         - name: this
-          format: parquet
+#          format: parquet
           paths:
-            - /Users/nigel/Workspace/code/nigel/Fusion/crates/fusion-unit-tests/tests/data/alltypes_plain.parquet
-        - name: csv
-          format: csv
+            - "{{CARGO_MANIFEST_DIR}}/tests/data/alltypes_plain.parquet"
+        - name: tsv
+#          format: tsv
           paths:
-            - /Users/nigel/Workspace/code/nigel/Fusion/crates/fusion-unit-tests/tests/data/capitalized_example.csv
-      upstream:
+            - "{{CARGO_MANIFEST_DIR}}/tests/data/capitalized_example.tsv"
+      external:
         - name: ups
           source: uid1
 

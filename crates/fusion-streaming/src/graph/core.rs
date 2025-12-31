@@ -5,6 +5,7 @@ use std::io::Read;
 use petgraph::{Directed, Graph};
 use url::Url;
 
+use crate::runtime::core::LaunchEnv;
 use fusion_unit_sdk::graph::types::{
     ComputingEdge, ComputingUnit, GraphDescription, SerializeType,
 };
@@ -28,10 +29,12 @@ pub struct LogicalGraph {
     /// name of current graph
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) name: Option<String>,
+    /// graph launch env
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) env: Option<LaunchEnv>,
     /// serializer type. [`SerializeType`]
     #[serde(skip)]
     pub(crate) serialize_type: Option<SerializeType>,
-
     /// description of current graph
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) graph_description: Option<GraphDescription>,

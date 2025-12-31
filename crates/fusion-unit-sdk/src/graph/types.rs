@@ -1,6 +1,6 @@
 use crate::proto::transfer::Row;
-use crate::runtime::UnitResult;
 use crate::runtime::logical::LogicalExecuteContext;
+use crate::runtime::UnitResult;
 use log::warn;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
@@ -111,6 +111,10 @@ impl ComputingUnit {
     pub fn with_config(mut self, conf: UnitConfig) -> Self {
         self.config = Some(conf);
         self
+    }
+
+    pub fn replace_config(&mut self, conf: UnitConfig) {
+        self.config.replace(conf);
     }
 
     pub fn with_name(mut self, name: &str) -> Self {

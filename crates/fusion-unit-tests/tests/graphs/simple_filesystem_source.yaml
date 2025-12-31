@@ -6,7 +6,7 @@ units:
     type: UniversalFsUnitTask
     version: unstable
     config:
-      uri: file:///Users/nigel/Workspace/code/nigel/Fusion/crates/fusion-unit-tests/tests/data/simple_test_log.log
+      uri: file://{{CARGO_MANIFEST_DIR}}/tests/data/simple_test_log.log
       separator: ","
 
   - id: output

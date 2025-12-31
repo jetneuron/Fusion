@@ -1,9 +1,9 @@
-use fusion_streaming::runtime::GraphRuntime;
 use fusion_streaming::runtime::plugin::PluginManager;
 use fusion_streaming::runtime::sandbox::SandboxRuntime;
+use fusion_streaming::runtime::GraphRuntime;
 
 #[tokio::test]
-pub async fn test_base_runtime() {
+pub async fn test_base_runtime() -> anyhow::Result<()> {
     // step1. create plugin manager, which had provided extension plugin implementations.
     let plugin_mgr = PluginManager::new().await;
     let dylib_path = format!(
@@ -29,5 +29,6 @@ pub async fn test_base_runtime() {
     let graph = runtime.create(graph_path);
 
     // execute the physical graph.
-    graph.execute().await;
+    graph.execute(None).await?;
+    Ok(())
 }

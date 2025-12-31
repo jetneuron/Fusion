@@ -1,7 +1,7 @@
 mod utils;
 
 use crate::utils::with_field_names;
-use anyhow::{Context, Error, Result};
+use anyhow::{Context, Result};
 use calamine::{
     open_workbook, Data, DeError, RangeDeserializerBuilder, Reader, Xlsx,
     XlsxError as CalamineXlsxError,
@@ -15,15 +15,13 @@ use fusion_unit_sdk::row::types::ColumnDescriptor;
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use fusion_unit_sdk::units::config_util::UnitConfigExt;
 use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
-use log::error;
 use protobuf::{Enum, EnumOrUnknown};
 use rust_xlsxwriter::{
     Color, DocProperties, Format, FormatAlign, FormatBorder, Workbook, Worksheet, XlsxError,
 };
 use std::fs;
-use std::fs::File;
 use std::future::Future;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
@@ -98,7 +96,7 @@ impl SpreadSheetUnitTask {
         });
     }
     /// parse field names from excel by specified field name row index.
-    fn parse_field_names_from_excel(&mut self, c: UnitConfig) -> Result<()> {
+    fn parse_field_names_from_excel(&mut self, c: UnitConfig) -> Result<(), UnitError> {
         let path = &self.path;
         self.field_name_row_index = c["field_name_row_index"]
             .as_u64()
@@ -112,8 +110,21 @@ impl SpreadSheetUnitTask {
                     Some(old) => Some(core::cmp::max(old, header_index + 1)),
                 };
 
-                let mut workbook: Xlsx<_> = open_workbook(path)?;
-                let range = workbook.worksheet_range(self.sheet_name.as_str())?;
+                let mut workbook: Xlsx<_> =
+                    open_workbook(path).map_err(|e: calamine::XlsxError| {
+                        UnitError::IOError(format!(
+                            "{}: Fail to open workbook from path: `{path}`",
+                            e.to_string()
+                        ))
+                    })?;
+                let range = workbook
+                    .worksheet_range(self.sheet_name.as_str())
+                    .map_err(|e| {
+                        UnitError::IOError(format!(
+                            "Fail to open sheet by name: `{}`",
+                            self.sheet_name
+                        ))
+                    })?;
                 let header_opt = range.rows().nth(header_index as usize);
 
                 let total_rows = range.rows().len();
@@ -135,7 +146,7 @@ impl SpreadSheetUnitTask {
                 }
 
                 match header_opt {
-                    None => Err(Error::msg(format!(
+                    None => Err(UnitError::IOError(format!(
                         "Header of index: {} not exists.",
                         header_index
                     ))),
@@ -212,7 +223,7 @@ impl InitUnit for SpreadSheetUnitTask {
         self.field_name_row_index = None;
         self.auto_types = true;
 
-        unit.get_config().map::<UnitResult<()>, _>(|c| {
+        if let Some(Err(err)) = unit.get_config().map::<UnitResult<()>, _>(|c| {
             self.path = c.require_string("path")?;
             self.skip_rows = c.extract_u64("skip_rows")?.or(None);
             self.sheet_name = c
@@ -223,14 +234,13 @@ impl InitUnit for SpreadSheetUnitTask {
             self.parse_config_field_names(&c);
             if self.field_names.is_none() {
                 if !sink_mode {
-                    self.parse_field_names_from_excel(c).map_err(|e| {
-                        error!("Failed to parse field names: {:?}", e.to_string());
-                        UnitError::config_invalidate("field name is invalidate")
-                    })?;
+                    self.parse_field_names_from_excel(c)?;
                 }
             }
             Ok(())
-        });
+        }) {
+            return Err(err);
+        }
 
         if self.field_names.is_some() {
             self.auto_types = false;

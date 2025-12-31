@@ -2,17 +2,17 @@ use crate::network::channel::TaskChannel;
 use crate::runtime::core::{GraphContext, LuaRow};
 use crate::runtime::{EVENT_TYPE_EOF, EVENT_TYPE_START};
 use crate::task::types::{TaskCore, UnitTask};
-use fusion_unit_sdk::graph::types::{ComputingUnit, TaskContext, EdgeCondition, Watermark};
+use fusion_unit_sdk::graph::types::{ComputingUnit, EdgeCondition, TaskContext, Watermark};
 use fusion_unit_sdk::proto::transfer::Row;
-use fusion_unit_sdk::runtime::UnitResult;
 use fusion_unit_sdk::runtime::logical::LogicalTask;
+use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use fusion_unit_sdk::units::compute_unit::UnitLifeCycle;
 use log::{debug, error, trace, warn};
 use mlua::Function;
 use std::panic;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{broadcast, Mutex};
 use tokio::task::JoinHandle;
 
 /// Physical task instance.
@@ -44,13 +44,12 @@ impl PhysicalTask {
     }
 
     /// create new physical task by provided logical task and watermark
-    pub fn new_with_watermark(
+    pub(crate) fn new_with_watermark(
         logical: Box<dyn LogicalTask + Send>,
         watermark: Watermark,
         execution_context: Arc<Mutex<GraphContext>>,
     ) -> PhysicalTask {
-        let s = SystemTime::now();
-        let time = s
+        let time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("Time went backwards")
             .as_micros();
@@ -75,6 +74,8 @@ impl PhysicalTask {
         let globals = lua.globals();
         let this_table = lua.create_table().expect("failed to create table");
         let scope_name = self.get_lua_scope_name().await;
+        #[cfg(feature = "trace-physical")]
+        trace!("physical init lua context. scope_name = {}", scope_name);
         globals
             .set(scope_name, this_table)
             .expect("failed to set global table");
@@ -90,7 +91,8 @@ impl PhysicalTask {
     /// on task END-of-FILE event
     pub async fn on_eof(&self, row: Row, ctx: &TaskContext) -> UnitResult<()> {
         let logical_task = &self.logical.lock().await;
-        logical_task.event(EVENT_TYPE_EOF, ctx, row, vec![]).await
+        logical_task.event(EVENT_TYPE_EOF, ctx, row, vec![]).await?;
+        self.shutdown().await
     }
 
     /// on task start event
@@ -263,7 +265,7 @@ impl PhysicalTask {
             trace!("creating channel from {self_id} to {target_id}");
 
             // create filter if edge configure contain `condition` node.
-            let mut filter_fn = Self::init_filter(edge_condition, execution_context).await;
+            let edge_filter_fn = Self::init_edge_filter(edge_condition, execution_context).await;
             let mut started = false;
 
             loop {
@@ -316,14 +318,14 @@ impl PhysicalTask {
                             break;
                         } else {
                             let recv_offset = row.offset;
-                            if filter_fn.is_none() {
+                            if edge_filter_fn.is_none() {
                                 let target_physical_task = target_cloned.lock().await;
                                 target_physical_task
                                     .compute(row, context.clone())
                                     .await
                                     .expect("fail to compute");
                             } else {
-                                let filter = filter_fn.as_ref().unwrap();
+                                let filter = edge_filter_fn.as_ref().unwrap();
                                 let matched = {
                                     let row_arc = Arc::new(Mutex::new(row));
                                     let lua_row = LuaRow::wrap(row_arc.clone()).await;
@@ -357,7 +359,24 @@ impl PhysicalTask {
         })
     }
 
-    async fn init_filter(
+    async fn shutdown(&self) -> UnitResult<()> {
+        let context = self.execution_context.lock().await;
+        let lua = context.lua.lock().await;
+        let globals = lua.globals();
+        let scope_name = self.get_lua_scope_name().await;
+        globals.raw_remove(scope_name.clone()).map_err(|err| {
+            UnitError::physical_error(format!(
+                "fail to remove lua script context: {}, err: {}",
+                scope_name,
+                err.to_string()
+            ))
+        })?;
+        #[cfg(feature = "trace-physical")]
+        trace!("removed physical lua table. scope_name = {}", scope_name);
+        Ok(())
+    }
+
+    async fn init_edge_filter(
         edge_condition: Option<EdgeCondition>,
         execution_context: Arc<Mutex<GraphContext>>,
     ) -> Option<Function> {

@@ -1,4 +1,4 @@
-use crate::types::FileFormat::{Auto, Csv, Excel, Parquet, Tsv};
+use crate::types::FileFormat::{Auto, Csv, Excel, Json, Parquet, Tsv};
 use async_trait::async_trait;
 use datafusion::arrow::array::{
     ArrayBuilder, BooleanBuilder, Float32Builder, Float64Builder, Int32Builder, Int64Builder,
@@ -21,13 +21,13 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 #[derive(Default, Clone)]
-pub(crate) struct ThisTable {
+pub(crate) struct LocalTable {
     pub(crate) name: String,
     pub(crate) paths: Vec<String>,
     pub(crate) format: FileFormat,
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Eq, PartialOrd, PartialEq)]
 pub(crate) enum FileFormat {
     #[default]
     Auto,
@@ -35,6 +35,7 @@ pub(crate) enum FileFormat {
     Tsv,
     Parquet,
     Excel,
+    Json,
 }
 
 impl FromStr for FileFormat {
@@ -46,6 +47,7 @@ impl FromStr for FileFormat {
             "tsv" => Ok(Tsv),
             "parquet" => Ok(Parquet),
             "excel" => Ok(Excel),
+            "json" => Ok(Json),
             &_ => Ok(Auto),
         }
     }
@@ -53,7 +55,7 @@ impl FromStr for FileFormat {
 
 /// upstream table info
 #[derive(Default)]
-pub(crate) struct UpstreamTable {
+pub(crate) struct ExternalTable {
     pub(crate) table_name: String,
     pub(crate) source_id: String,
 }

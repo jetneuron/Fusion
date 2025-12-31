@@ -1,4 +1,4 @@
-use crate::types::{FileFormat, MemoryTable, ThisTable, UpstreamTable};
+use crate::types::{ExternalTable, FileFormat, LocalTable, MemoryTable};
 use crate::utils::as_row;
 use datafusion::arrow::array::{Datum, RecordBatch};
 use datafusion::arrow::datatypes::DataType::{Boolean, Float32, Float64, Int32, Int64, Utf8};
@@ -12,10 +12,11 @@ use fusion_unit_sdk::graph::types::{
     ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext, UnitConfig,
 };
 use fusion_unit_sdk::proto::transfer::{DataType, Row};
-use fusion_unit_sdk::runtime::UnitResult;
+use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use std::collections::HashMap;
 use std::future::Future;
 use std::ops::{Deref, Index};
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -29,11 +30,10 @@ const ORIGIN_META_KEY: &str = "origin_name";
 pub struct DataFusionUnit {
     /// sql scripts
     sql: String,
-    /// this datasource descriptor. table name always is `this`
-    these: Vec<ThisTable>,
-    /// upstream tables
-    upstream: Vec<UpstreamTable>,
-
+    /// local datasource descriptor.
+    local: Vec<LocalTable>,
+    /// external (upstream) tables
+    external: Vec<ExternalTable>,
     runtime_tables: Arc<Mutex<HashMap<String, Arc<Mutex<MemoryTable>>>>>,
 }
 
@@ -42,9 +42,9 @@ impl InitUnit for DataFusionUnit {
         let conf = unit.get_config();
         conf.map(|c| {
             self.sql = c["sql"].as_str().expect("sql is not string").to_string();
-            self.initialize_these_tables(&c);
-            self.initialize_upstream_tables(&c);
-            if self.upstream.is_empty() && self.these.is_empty() {
+            self.initialize_local_tables(&c);
+            self.initialize_external_tables(&c);
+            if self.external.is_empty() && self.local.is_empty() {
                 panic!("There is no any tables.");
             }
         });
@@ -54,21 +54,21 @@ impl InitUnit for DataFusionUnit {
 
 impl DataFusionUnit {
     /// parse the tables which read from current node config
-    fn initialize_these_tables(&mut self, c: &UnitConfig) {
-        let these = &c["these"].as_array();
-        if these.is_none() {
+    fn initialize_local_tables(&mut self, c: &UnitConfig) {
+        let local = &c["local"].as_array();
+        if local.is_none() {
             return;
         }
 
         // check file descriptor config
-        let these_tables = these
+        let local_tables = local
             .expect("file descriptor is not an object or empty.")
             .clone();
 
-        self.these = these_tables
+        self.local = local_tables
             .iter()
             .map(|conf| {
-                let mut table = ThisTable::default();
+                let mut table = LocalTable::default();
                 // set table name
                 table.name = conf["name"]
                     .as_str()
@@ -97,17 +97,17 @@ impl DataFusionUnit {
             .collect::<Vec<_>>();
     }
 
-    /// parse the upstream tables
-    fn initialize_upstream_tables(&mut self, c: &UnitConfig) {
-        let upstream = c["upstream"].as_array();
-        if upstream.is_none() {
+    /// parse the external tables
+    fn initialize_external_tables(&mut self, c: &UnitConfig) {
+        let external = c["external"].as_array();
+        if external.is_none() {
             return;
         }
-        self.upstream = upstream
+        self.external = external
             .unwrap()
             .into_iter()
             .map(|ups| {
-                let mut ups_table = UpstreamTable::default();
+                let mut ups_table = ExternalTable::default();
                 ups_table.table_name = ups["name"]
                     .as_str()
                     .expect("table name must be str")
@@ -122,10 +122,30 @@ impl DataFusionUnit {
     }
 
     /// register data table into session context
-    async fn register_data_table(table: &ThisTable, session: &SessionContext) {
+    async fn register_data_table(table: &LocalTable, session: &SessionContext) -> UnitResult<()> {
         let table_name = &table.name;
+        let final_format = if FileFormat::Auto.eq(&table.format) {
+            let path = &table.paths[0];
+            let path_seg = path.split(".").collect::<Vec<&str>>();
+            let extension_seg = path_seg[path_seg.len() - 1].to_lowercase();
+            let extension = extension_seg.as_str();
+            let infer_format = FileFormat::from_str(extension).map_err(|err| {
+                UnitError::config_invalidate(format!(
+                    "Could not infer file format for extension: {}",
+                    extension
+                ))
+            })?;
+            if FileFormat::Auto.eq(&infer_format) {
+                return Err(UnitError::config_invalidate(String::from(
+                    "Could not infer table format.",
+                )));
+            }
+            infer_format
+        } else {
+            table.format.clone()
+        };
 
-        match table.format {
+        match final_format {
             FileFormat::Auto => {
                 unimplemented!()
             }
@@ -135,32 +155,66 @@ impl DataFusionUnit {
                 csv_read_options =
                     Self::infer_csv_schema(table, &session, &mut schema, csv_read_options).await;
                 session
-                    .register_csv(table_name, table.paths.index(0), csv_read_options)
+                    .register_csv(table_name, &table.paths[0], csv_read_options)
                     .await
-                    .expect("registration of table failed");
+                    .map_err(|err| {
+                        UnitError::unknown(format!(
+                            "register csv table failed: {}",
+                            err.to_string()
+                        ))
+                    })
             }
             FileFormat::Tsv => {
-                unimplemented!()
-            }
-            FileFormat::Parquet => {
+                let mut csv_read_options = CsvReadOptions::new();
+                let mut schema = Schema::empty();
+                csv_read_options.delimiter = '\t' as u8;
+                csv_read_options.file_extension = ".tsv";
+                csv_read_options =
+                    Self::infer_csv_schema(table, &session, &mut schema, csv_read_options).await;
                 session
-                    .register_parquet(
-                        table_name,
-                        table.paths.index(0),
-                        ParquetReadOptions::default(),
-                    )
+                    .register_csv(table_name, table.paths.index(0), csv_read_options)
                     .await
-                    .expect("registration of table failed");
+                    .map_err(|err| {
+                        UnitError::unknown(format!(
+                            "register tsv table failed: {}",
+                            err.to_string()
+                        ))
+                    })
             }
+            FileFormat::Parquet => session
+                .register_parquet(
+                    table_name,
+                    table.paths.index(0),
+                    ParquetReadOptions::default(),
+                )
+                .await
+                .map_err(|err| {
+                    UnitError::unknown(format!(
+                        "register parquet table failed: {}",
+                        err.to_string()
+                    ))
+                }),
             FileFormat::Excel => {
                 unimplemented!()
+            }
+            FileFormat::Json => {
+                let json_opt = NdJsonReadOptions::default();
+                session
+                    .register_json(table_name, &table.paths[0], json_opt)
+                    .await
+                    .map_err(|err| {
+                        UnitError::unknown(format!(
+                            "register json table failed: {}",
+                            err.to_string()
+                        ))
+                    })
             }
         }
     }
 
     /// infer csv file schema, retain the origin column name in metadata
     async fn infer_csv_schema<'a>(
-        table: &'a ThisTable,
+        table: &'a LocalTable,
         session: &'a SessionContext,
         schema: &'a mut Schema,
         mut options: CsvReadOptions<'a>,
@@ -191,7 +245,7 @@ impl DataFusionUnit {
         options
     }
 
-    /// initialize the table schema from upstream by provided row data.
+    /// initialize the table schema from external by provided row data.
     fn initialize_table_schema_with_row_data(row: &Row) -> MemoryTable {
         let fields = row
             .columns
@@ -250,19 +304,19 @@ impl SourceUnit for DataFusionUnit {
         &self,
         ctx: Arc<TaskContext>,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send> {
-        let upstream_is_empty = self.upstream.is_empty();
+        let external_is_empty = self.external.is_empty();
         Ok(async move {
-            if !upstream_is_empty {
+            if !external_is_empty {
                 return Ok(());
             }
-            let this_cloned = (&self.these).to_vec();
+            let this_cloned = (&self.local).to_vec();
             let sql = self.sql.clone();
 
             // read from specified datasource, such as csv, parquet, txt.
             let session_config = SessionConfig::new();
             let session = SessionContext::new_with_config(session_config);
             for this_tbl in this_cloned {
-                Self::register_data_table(&this_tbl, &session).await;
+                Self::register_data_table(&this_tbl, &session).await?;
             }
 
             let df = session.sql(sql.as_str()).await.expect("query failed");
@@ -285,11 +339,11 @@ impl MapUnit for DataFusionUnit {
         'life0: 'async_trait,
         Self: 'async_trait,
     {
-        let upstream_is_empty = self.upstream.is_empty();
+        let external_is_empty = self.external.is_empty();
         let cloned_arc_table = self.runtime_tables.clone();
         Ok(async move {
-            if !upstream_is_empty {
-                // get upstream memory table by source id
+            if !external_is_empty {
+                // get external memory table by source id
                 let arc_table = {
                     let mut stream_tables = cloned_arc_table.lock().await;
                     let source_id = &row.source;
@@ -324,19 +378,19 @@ impl MapUnit for DataFusionUnit {
         'life0: 'async_trait,
         Self: 'async_trait,
     {
-        let upstream_is_empty = self.upstream.is_empty();
-        let upstream_tables = self
-            .upstream
+        let external_is_empty = self.external.is_empty();
+        let external_tables = self
+            .external
             .iter()
             .map(|t| t.table_name.clone())
             .collect::<Vec<String>>();
         let cloned_arc_table = self.runtime_tables.clone();
-        let local_tables = self.these.clone();
+        let local_tables = self.local.clone();
         Ok(async move {
-            if !upstream_is_empty {
+            if !external_is_empty {
                 let session_config = SessionConfig::new();
                 let session_ctx = SessionContext::new_with_config(session_config);
-                for upstream_table in upstream_tables {
+                for external_table in external_tables {
                     let mut stream_tables = cloned_arc_table.lock().await;
                     let source_id = &row.source;
                     let arc_memory_tbl = stream_tables
@@ -345,12 +399,12 @@ impl MapUnit for DataFusionUnit {
                         .clone();
                     let memory_tbl = arc_memory_tbl.lock().await.deref().clone();
                     session_ctx
-                        .register_table(upstream_table, Arc::new(memory_tbl))
+                        .register_table(external_table, Arc::new(memory_tbl))
                         .expect("register table failed");
                 }
 
                 for local_tbl in local_tables {
-                    Self::register_data_table(&local_tbl, &session_ctx).await;
+                    Self::register_data_table(&local_tbl, &session_ctx).await?;
                 }
 
                 if let Ok(dataframe) = session_ctx.sql(&self.sql).await {

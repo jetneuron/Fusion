@@ -5,6 +5,7 @@ use crate::runtime::plugin::PluginManager;
 use crate::utils::tera_func;
 use crate::utils::tera_func::RegisterTeraBuiltinFunc;
 use async_trait::async_trait;
+use log::trace;
 use mlua::Lua;
 use std::sync::Arc;
 use tera::{Function, Tera};
@@ -34,12 +35,17 @@ impl GraphRuntime for SandboxRuntime {
             logical_graph,
             plugin_manager: self.plugin_manager.clone(),
             graph_lua: Arc::clone(&self.global_lua),
+            tera: Arc::clone(&self.tera),
         }
     }
 
     async fn register_tera_function<F: Function + 'static>(&mut self, name: &str, function: F) {
         let mut tera = self.tera.lock().await;
         tera.register_function(name, function);
+        trace!(
+            "register functions to [sandbox] physical environment: {}",
+            name
+        );
     }
 }
 
@@ -51,5 +57,7 @@ impl RegisterTeraBuiltinFunc for SandboxRuntime {
         self.register_tera_function("yyyy_MM_dd", tera_func::yyyy_mm_dd)
             .await;
         self.register_tera_function("now", tera_func::now).await;
+        self.register_tera_function("time", tera_func::human_time)
+            .await;
     }
 }

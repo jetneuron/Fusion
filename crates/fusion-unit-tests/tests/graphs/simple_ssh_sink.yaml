@@ -5,7 +5,7 @@ units:
     name: input_node
     type: SpreadSheetUnitTask
     config:
-      path: "/Users/nigel/Workspace/code/nigel/Fusion Pro/graph-units/graph-unit-tests/tests/data/test_skin_attribute_data.xlsx"
+      path: "{{CARGO_MANIFEST_DIR}}/tests/data/test_skin_attribute_data.xlsx"
       sheet_name: "Sheet1"
       field_name_row_index: 1
       skip_rows: 3
@@ -14,8 +14,9 @@ units:
     name: input_node
     type: SSHUnitTask
     config:
-      user: nigel
-      private_key: /Users/nigel/.ssh/id_rsa
+      host: 172.31.88.128
+      port: 59522
+      private_key: /Users/nigel/.ssh/company-ssh-key/tunnel_ssh_rsa/id_rsa
       shell: |
         echo "test" >> /tmp/data.test
       separator: "\t"
