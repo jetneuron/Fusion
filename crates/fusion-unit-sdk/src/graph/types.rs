@@ -1,5 +1,6 @@
 use crate::proto::transfer::Row;
 use crate::runtime::logical::LogicalExecuteContext;
+use crate::runtime::state::GraphStates;
 use crate::runtime::UnitResult;
 use log::warn;
 use serde_derive::{Deserialize, Serialize};
@@ -12,6 +13,20 @@ use tokio::sync::broadcast::Sender;
 use tokio::sync::{Mutex, RwLock};
 
 pub type UnitIdx = String;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UnitMeta {
+    pub(crate) id: UnitIdx,
+}
+
+impl UnitMeta {
+    pub fn get_id(&self) -> UnitIdx {
+        self.id.clone()
+    }
+    pub fn set_id(&mut self, id: UnitIdx) {
+        self.id = id;
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GraphDescription {}
@@ -60,6 +75,10 @@ pub struct ComputingUnit {
     outgoing: usize,
     #[serde(default)]
     incoming: usize,
+
+    // --------- Runtime Fields ---------
+    #[serde(skip)]
+    runtime_states: Option<GraphStates>,
 }
 
 pub type EdgeConfig = Value;
@@ -100,6 +119,7 @@ impl ComputingUnit {
             version: None,
             outgoing: 0,
             incoming: 0,
+            runtime_states: None,
         }
     }
 
@@ -149,6 +169,14 @@ impl ComputingUnit {
 
     pub fn is_sink(&self) -> bool {
         self.incoming > 0 && self.outgoing == 0
+    }
+
+    pub fn with_states(&mut self, states: GraphStates) {
+        self.runtime_states.replace(states);
+    }
+
+    pub fn get_runtime_states(&self) -> Option<GraphStates> {
+        self.runtime_states.clone()
     }
 }
 
@@ -241,6 +269,7 @@ pub struct Stats {
 pub struct TaskContext {
     pub unit: ComputingUnit,
     pub sender: BackpressureSender,
+    pub states: GraphStates,
 }
 
 pub struct Watermark {
@@ -351,11 +380,13 @@ impl TaskContext {
         unit: ComputingUnit,
         sender: Sender<Row>,
         watermark: Arc<RwLock<Watermark>>,
+        states: GraphStates,
     ) -> Self {
         let id = unit.id.clone();
         TaskContext {
             unit,
             sender: BackpressureSender::new(id, sender, watermark),
+            states,
         }
     }
 

@@ -1,11 +1,17 @@
 use crate::runtime::core::{LuaContext, LuaRow};
-use crate::utils::script::{Script, ScriptType};
+use crate::runtime::scripts;
 use fusion_derive::{MapLogicTask, SinkLogicTask, SrcLogicTask};
-use fusion_unit_sdk::graph::types::{ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext};
+use fusion_unit_sdk::graph::types::{
+    ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext, UnitMeta,
+};
 use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
 use fusion_unit_sdk::row::types::RAW_STR;
-use fusion_unit_sdk::runtime::UnitResult;
+use fusion_unit_sdk::runtime::logical::LogicalTaskMeta;
+use fusion_unit_sdk::runtime::script::{Script, Scripter, script_registry};
+use fusion_unit_sdk::runtime::script_engine_factory::Product;
+use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use fusion_unit_sdk::units::compute_unit::UnitCreator;
+use fusion_unit_sdk::units::config_util::UnitConfigExt;
 use libc::glob;
 use log::{info, warn};
 use mlua::{Function, Lua, Table, UserData, UserDataMethods};
@@ -19,6 +25,7 @@ use tokio::sync::{Mutex, MutexGuard};
 
 #[derive(Default, SrcLogicTask)]
 pub struct DebugInputUnitTask {
+    meta: UnitMeta,
     /// iterator times
     iter_times: i64,
     /// generate column count
@@ -88,7 +95,9 @@ impl SourceUnit for DebugInputUnitTask {
 }
 
 #[derive(Default, MapLogicTask)]
-pub struct DebugMapUnitTask {}
+pub struct DebugMapUnitTask {
+    meta: UnitMeta,
+}
 
 impl InitUnit for DebugMapUnitTask {}
 
@@ -112,54 +121,38 @@ impl MapUnit for DebugMapUnitTask {
 
 #[derive(Default, MapLogicTask)]
 pub struct MapUnitTask {
+    meta: UnitMeta,
     script: Script,
     lua: Arc<Mutex<Lua>>,
+    scripter: Option<Arc<Mutex<Box<dyn Scripter + Send>>>>,
 }
 
 impl InitUnit for MapUnitTask {
     fn init(&mut self, unit: ComputingUnit) -> UnitResult<()> {
         let conf = unit.get_config();
-        conf.map(|c| {
-            self.script.code = c["script"].as_str().unwrap_or_default().to_string();
-            self.script.script_type = c["type"]
-                .as_str()
-                .unwrap()
-                .parse()
-                .unwrap_or(ScriptType::Lua);
+        if let Some(result) = conf.map::<UnitResult<()>, _>(|c| {
+            let script = c.require_string("script")?;
+            let states = unit
+                .get_runtime_states()
+                .ok_or_else(|| UnitError::ScriptInitErr(String::from("runtime states unready")))?;
+            let script_type = c
+                .extract_string("script_type")?
+                .unwrap_or_else(|| String::from("lua"));
 
-            match self.script.script_type {
-                ScriptType::Lua => {
-                    self.init_lua();
-                }
-            }
-        });
+            self.scripter = Some(script_registry::create_scripter(
+                &script_type,
+                script,
+                states,
+            ));
+            Ok(())
+        }) {
+            result?;
+        }
         Ok(())
     }
 }
 
-const FUSION_LUA_FUNC_NAME: &str = "__fusion_lua_map_func";
 impl MapUnitTask {
-    fn init_lua(&mut self) {
-        let lua = Lua::new();
-
-        let script_code = self.script.code.clone();
-        let func_name = FUSION_LUA_FUNC_NAME;
-        let chunk = format!(
-            r#"
-function {func_name}(ctx, data)
-  {}
-  return true
-end"#,
-            script_code.lines().collect::<Vec<&str>>().join("\n  ")
-        );
-
-        log::debug!("lua code: {}", &chunk);
-        lua.load(chunk)
-            .exec()
-            .expect("failed to eval script function");
-        self.lua = Arc::new(Mutex::new(lua));
-    }
-
     async fn init_compute_table<'a>(&self, row: Row) -> Table {
         let row_table = {
             let lua = self.lua.lock().await;
@@ -190,32 +183,20 @@ impl MapUnit for MapUnitTask {
         &'life0 self,
         row: Row,
         ctx: &'life0 TaskContext,
-    ) -> Result<
-        impl Future<Output = Result<(), fusion_unit_sdk::runtime::UnitError>> + Send,
-        anyhow::Error,
-    >
+    ) -> Result<impl Future<Output = Result<(), UnitError>> + Send, anyhow::Error>
     where
         'life0: 'async_trait,
         Self: 'async_trait,
     {
         Ok(Box::pin(async move {
-            let func = {
-                let lua = self.lua.lock().await;
-                let globals = lua.globals();
-                globals
-                    .get::<Function>(FUSION_LUA_FUNC_NAME)
-                    .expect("concatenate a function")
-            };
-
-            let ctx = LuaContext::wrap(ctx.clone());
-            let arc_row = Arc::new(Mutex::new(row));
-            let lua_row = LuaRow::wrap(arc_row).await;
-            match func.call_async::<bool>((ctx, lua_row)).await {
-                Ok(_) => {}
-                Err(err) => {
-                    println!("{}", err);
-                }
-            };
+            let scripter = self
+                .scripter
+                .as_ref()
+                .ok_or(UnitError::Unknown(String::from("Scripter not initialized")))?;
+            let scripter = scripter.lock().await;
+            let states = ctx.states.clone();
+            let id = self.meta.get_id();
+            scripter.row_eval(&id, states, ctx, row).await?;
             Ok(())
         }))
     }
@@ -229,6 +210,7 @@ pub struct Stats {
 
 #[derive(Default, SinkLogicTask)]
 pub struct DebugOutputUnitTask {
+    meta: UnitMeta,
     hide_header: bool,
     hide_console: bool,
     show_report: bool,

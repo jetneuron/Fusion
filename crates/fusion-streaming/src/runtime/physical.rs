@@ -1,10 +1,12 @@
 use crate::network::channel::TaskChannel;
-use crate::runtime::core::{GraphContext, LuaRow};
+use crate::runtime::core::LuaRow;
+use crate::runtime::scripts::{GraphLua, LuaScript};
 use crate::runtime::{EVENT_TYPE_EOF, EVENT_TYPE_START};
 use crate::task::types::{TaskCore, UnitTask};
 use fusion_unit_sdk::graph::types::{ComputingUnit, EdgeCondition, TaskContext, Watermark};
 use fusion_unit_sdk::proto::transfer::Row;
 use fusion_unit_sdk::runtime::logical::LogicalTask;
+use fusion_unit_sdk::runtime::state::GraphStates;
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use fusion_unit_sdk::units::compute_unit::UnitLifeCycle;
 use log::{debug, error, trace, warn};
@@ -23,8 +25,8 @@ pub struct PhysicalTask {
     pub(crate) core: Arc<Mutex<TaskCore>>,
     /// statistic data
     pub(crate) stats: Stats,
-    /// execution context
-    pub(crate) execution_context: Arc<Mutex<GraphContext>>,
+    /// states manager
+    pub(crate) states: GraphStates,
 }
 
 #[derive(Default)]
@@ -39,15 +41,18 @@ pub struct Stats {
 impl PhysicalTask {
     /// create new physical task by provided logical task
     pub fn new(logical: Box<dyn LogicalTask + Send>) -> PhysicalTask {
-        let execution_context = Arc::new(Mutex::new(GraphContext::default()));
-        Self::new_with_watermark(logical, Watermark::new(16, 13, 8, 0), execution_context)
+        Self::new_with_watermark(
+            logical,
+            Watermark::new(16, 13, 8, 0),
+            GraphStates::default(),
+        )
     }
 
     /// create new physical task by provided logical task and watermark
     pub(crate) fn new_with_watermark(
         logical: Box<dyn LogicalTask + Send>,
         watermark: Watermark,
-        execution_context: Arc<Mutex<GraphContext>>,
+        states: GraphStates,
     ) -> PhysicalTask {
         let time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -57,7 +62,7 @@ impl PhysicalTask {
             logical: Arc::new(Mutex::new(logical)),
             core: Arc::new(Mutex::new(TaskCore::new(time.to_string(), watermark))),
             stats: Stats::default(),
-            execution_context,
+            states,
         }
     }
 
@@ -69,8 +74,9 @@ impl PhysicalTask {
 
     /// initialize script environment, current lua script was supported.
     pub async fn init_script_env(&self) {
-        let context = self.execution_context.lock().await;
-        let lua = context.lua.lock().await;
+        let lua_ref = self.states.state::<GraphLua>().unwrap();
+        let lua_state = lua_ref.inner();
+        let lua = lua_state.0.lock().await;
         let globals = lua.globals();
         let this_table = lua.create_table().expect("failed to create table");
         let scope_name = self.get_lua_scope_name().await;
@@ -139,6 +145,7 @@ impl PhysicalTask {
     pub fn launch(&self) -> JoinHandle<anyhow::Result<()>> {
         let self_cloned = self.core.clone();
         let cloned_logical = (&self.logical).clone();
+        let states = self.states.clone();
         tokio::task::spawn(async move {
             let ctx = {
                 let self_tc = self_cloned.lock().await;
@@ -146,7 +153,7 @@ impl PhysicalTask {
 
                 let self_unit = self_tc.unit.clone().expect("Failed to get unit");
                 let self_sender = (&self_tc.channel.internal_channel.0).clone();
-                TaskContext::new(self_unit, self_sender, watermark)
+                TaskContext::new(self_unit, self_sender, watermark, states)
             };
 
             let self_logical = cloned_logical.lock().await;
@@ -229,7 +236,7 @@ impl PhysicalTask {
     ) -> JoinHandle<anyhow::Result<()>> {
         let self_cloned = self.core.clone();
         let target_cloned = Arc::clone(&target);
-        let execution_context = self.execution_context.clone();
+        let states = self.states.clone();
         tokio::task::spawn(async move {
             let mut receiver = {
                 let self_tc = self_cloned.lock().await;
@@ -256,7 +263,7 @@ impl PhysicalTask {
                 )
             };
             let target_id = ch.0.get_id().clone();
-            let context = TaskContext::new(ch.0, ch.1, ch.3.clone());
+            let context = TaskContext::new(ch.0, ch.1, ch.3.clone(), states.clone());
             let internal_sender = ch.2;
             let watermark = ch.3;
             let self_id = receiver.0.clone();
@@ -265,7 +272,7 @@ impl PhysicalTask {
             trace!("creating channel from {self_id} to {target_id}");
 
             // create filter if edge configure contain `condition` node.
-            let edge_filter_fn = Self::init_edge_filter(edge_condition, execution_context).await;
+            let edge_filter_fn = Self::init_edge_filter(edge_condition, states).await;
             let mut started = false;
 
             loop {
@@ -360,8 +367,9 @@ impl PhysicalTask {
     }
 
     async fn shutdown(&self) -> UnitResult<()> {
-        let context = self.execution_context.lock().await;
-        let lua = context.lua.lock().await;
+        let lua_ref = self.states.state::<GraphLua>().unwrap();
+        let lua_state = lua_ref.inner();
+        let lua = lua_state.0.lock().await;
         let globals = lua.globals();
         let scope_name = self.get_lua_scope_name().await;
         globals.raw_remove(scope_name.clone()).map_err(|err| {
@@ -378,12 +386,13 @@ impl PhysicalTask {
 
     async fn init_edge_filter(
         edge_condition: Option<EdgeCondition>,
-        execution_context: Arc<Mutex<GraphContext>>,
+        states: GraphStates,
     ) -> Option<Function> {
         if let Some(condition) = edge_condition {
             if let Some(script) = condition.get_script() {
-                let execution_context = execution_context.lock().await;
-                let lua = execution_context.lua.lock().await;
+                let lua_ref = states.state::<GraphLua>().unwrap();
+                let lua_state = lua_ref.inner();
+                let lua = lua_state.0.lock().await;
                 let func = lua
                     .load(format!(
                         r#"

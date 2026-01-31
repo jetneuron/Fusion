@@ -6,10 +6,20 @@ use std::pin::Pin;
 
 pub trait LogicalExecuteContext {}
 
+pub trait LogicalTaskMeta {
+    fn get_id(&self) -> String {
+        unimplemented!("You must implement this func for get the task unique id")
+    }
+
+    fn set_id(&mut self, id: String) {
+        unimplemented!("You must implement this func for set the task unique id")
+    }
+}
+
 ///
 /// Logical task which can describe the business node execution.
 ///
-pub trait LogicalTask {
+pub trait LogicalTask: LogicalTaskMeta {
     /// create logical task by provided computing unit configuration.
     fn create(unit: ComputingUnit) -> UnitResult<Box<dyn LogicalTask + Send>>
     where

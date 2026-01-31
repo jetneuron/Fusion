@@ -1,8 +1,11 @@
 use crate::runtime::PRODUCT_INFO;
 use crate::task::http_unit::UnitMode::Source;
 use fusion_derive::{LogicalTask, SrcLogicTask};
-use fusion_unit_sdk::graph::types::{ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext};
+use fusion_unit_sdk::graph::types::{
+    ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext, UnitMeta,
+};
 use fusion_unit_sdk::proto::transfer::Row;
+use fusion_unit_sdk::runtime::logical::LogicalTaskMeta;
 use fusion_unit_sdk::runtime::UnitResult;
 use jsonpath_rust::JsonPath;
 use mlua::Lua;
@@ -17,6 +20,7 @@ use url::Url;
 
 #[derive(Default, SrcLogicTask)]
 pub struct HttpApiTask {
+    meta: UnitMeta,
     uri: String,
     port: Option<u16>,
 }
@@ -38,6 +42,7 @@ impl SourceUnit for HttpApiTask {
 
 #[derive(Default, LogicalTask)]
 pub struct HttpUnitTask {
+    meta: UnitMeta,
     url: String,
     content_type: Option<String>,
     client: Client,

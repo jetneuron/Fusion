@@ -8,8 +8,11 @@ use crate::core::{IntoUniversalIO, UniversalIO, UniversalIOConfig};
 use crate::error::IOError;
 use anyhow::Context;
 use fusion_derive::LogicalTask;
-use fusion_unit_sdk::graph::types::{ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext};
+use fusion_unit_sdk::graph::types::{
+    ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext, UnitMeta,
+};
 use fusion_unit_sdk::proto::transfer::Row;
+use fusion_unit_sdk::runtime::logical::LogicalTaskMeta;
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use fusion_unit_sdk::units::config_util::UnitConfigExt;
 use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
@@ -43,6 +46,7 @@ pub type BoxedUniversalIO =
 
 #[derive(Default, LogicalTask)]
 pub struct UniversalFsUnitTask {
+    meta: UnitMeta,
     uri: String,
     formatter: Option<String>,
     separator: Option<String>,

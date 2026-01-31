@@ -1,0 +1,9 @@
+[package]
+name = "fusion-script-ts"
+version = "0.1.0"
+authors.workspace = true
+homepage.workspace = true
+edition.workspace = true
+
+[dependencies]
+deno_core = "0.382.0"

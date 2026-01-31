@@ -2,8 +2,8 @@ use crate::core::{IntoUniversalIO, RowReader, RowWriter, UniversalIO, UniversalI
 use crate::error::IOError;
 use anyhow::anyhow;
 use fusion_unit_sdk::proto::transfer::Row;
-use fusion_unit_sdk::row::formatter::StrRawFormatter;
-use fusion_unit_sdk::row::utils::{RawFormatter, RowToString};
+use fusion_unit_sdk::row::serializer::{Formatter, SeparatorFormatter};
+use fusion_unit_sdk::row::utils::RowToString;
 use fusion_unit_sdk::units::config_util::UnitConfigExt;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
@@ -48,12 +48,7 @@ impl RowReader for LocalFileSystem {
     fn rows(&self) -> anyhow::Result<Self::Reader, IOError> {
         let file = File::open(&self.path).map_err(|e| IOError::OpenError(e.to_string()))?;
         let reader = BufReader::new(file);
-        let mut formatter = StrRawFormatter::new();
-        let separator = &self.column_separator;
-        if !separator.is_empty() {
-            formatter = formatter.with_separator(separator);
-        }
-        let formatter = Box::new(formatter);
+        let formatter = Box::new(SeparatorFormatter::new(self.column_separator.clone()));
         Ok(Box::new(IterableRow { reader, formatter }))
     }
 }
@@ -108,7 +103,7 @@ pub trait IntoIterableRow {
 }
 pub struct IterableRow {
     reader: BufReader<File>,
-    formatter: Box<dyn RawFormatter<String>>,
+    formatter: Box<dyn Formatter<String>>,
 }
 
 impl Iterator for IterableRow {
@@ -125,7 +120,7 @@ impl Iterator for IterableRow {
                 line.clear();
                 Some(
                     self.formatter
-                        .into_row(line_trimmed)
+                        .into_row(line_trimmed, &None)
                         .map_err(|err| IOError::field_fmt_error(err.to_string())),
                 )
             }

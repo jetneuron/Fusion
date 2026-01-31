@@ -9,9 +9,10 @@ use datafusion::logical_expr::UserDefinedLogicalNode;
 use datafusion::prelude::*;
 use fusion_derive::LogicalTask;
 use fusion_unit_sdk::graph::types::{
-    ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext, UnitConfig,
+    ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext, UnitConfig, UnitMeta,
 };
 use fusion_unit_sdk::proto::transfer::{DataType, Row};
+use fusion_unit_sdk::runtime::logical::LogicalTaskMeta;
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use std::collections::HashMap;
 use std::future::Future;
@@ -28,6 +29,7 @@ const ORIGIN_META_KEY: &str = "origin_name";
 /// This unit could be one of `Source`, `Map` or `Sink`, depend on the computing unit configuration.
 #[derive(Default, LogicalTask)]
 pub struct DataFusionUnit {
+    meta: UnitMeta,
     /// sql scripts
     sql: String,
     /// local datasource descriptor.

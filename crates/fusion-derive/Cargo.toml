@@ -11,3 +11,5 @@ proc-macro = true
 [dependencies]
 syn = "2.0.91"
 quote = "1.0.37"
+lazy_static = "1.5.0"
+proc-macro2 = "1.0.103"

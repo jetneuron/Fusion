@@ -8,12 +8,12 @@ members = [
     "crates/fusion-derive",
     "crates/fusion-streaming",
     "crates/fusion-unit-datafusion",
-    "crates/fusion-unit-excel",
+    "crates/fusion-unit-excel", "crates/fusion-unit-redis",
     "crates/fusion-unit-sdk",
     "crates/fusion-unit-ssh",
     "crates/fusion-unit-tests",
-    "crates/fusion-unit-universal-fs"
-]
+    "crates/fusion-unit-universal-fs",
+    "crates/scripts/fusion-script-ts"]
 resolver = "3"
 
 [profile.dev]

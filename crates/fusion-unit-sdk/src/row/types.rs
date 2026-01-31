@@ -136,8 +136,9 @@ pub struct ColumnDescriptor {
 }
 
 impl ColumnDescriptor {
-    pub fn new() -> Self {
-        ColumnDescriptor::default()
+    pub fn new<T: Into<String>>(name: T, data_type: DataType) -> Self {
+        let name = name.into();
+        ColumnDescriptor { name, data_type }
     }
 
     //noinspection DuplicatedCode
@@ -145,7 +146,7 @@ impl ColumnDescriptor {
     where
         T: Into<String> + Clone,
     {
-        let mut descriptor = Self::new();
+        let mut descriptor = Self::default();
         descriptor.name = name;
         descriptor.data_type = unknown;
         infers.into_iter().fold(descriptor, |mut acc, val| {

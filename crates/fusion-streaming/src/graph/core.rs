@@ -2,13 +2,13 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 
-use petgraph::{Directed, Graph};
-use url::Url;
-
 use crate::runtime::core::LaunchEnv;
 use fusion_unit_sdk::graph::types::{
     ComputingEdge, ComputingUnit, GraphDescription, SerializeType,
 };
+use petgraph::{Directed, Graph};
+use url::Url;
+use uuid::Uuid;
 
 pub type PetGraph = Graph<ComputingUnit, ComputingEdge, Directed>;
 
@@ -26,6 +26,9 @@ pub type PetGraph = Graph<ComputingUnit, ComputingEdge, Directed>;
 ///
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct LogicalGraph {
+    /// unique id of graph
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) id: Option<String>,
     /// name of current graph
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) name: Option<String>,
@@ -132,7 +135,7 @@ impl LogicalGraph {
 
     fn from_str_content(value: &str) -> LogicalGraph {
         // whether json or yaml formatted
-        match serde_yaml::from_str::<LogicalGraph>(value) {
+        let mut graph = match serde_yaml::from_str::<LogicalGraph>(value) {
             Ok(json_graph) => json_graph.with_serialize_type(SerializeType::Yaml),
             Err(e1) => match serde_json::from_str::<LogicalGraph>(value) {
                 Ok(yaml_graph) => yaml_graph.with_serialize_type(SerializeType::Json),
@@ -140,7 +143,17 @@ impl LogicalGraph {
                     panic!("error: {:?}, e1: {:?}, content: \n{}", e1, err, value)
                 }
             },
+        };
+
+        if graph.id.is_none() {
+            graph.id.replace(Uuid::new_v4().to_string());
         }
+
+        graph
+    }
+
+    pub fn get_id(&self) -> String {
+        self.id.clone().expect("Could not get graph unique id")
     }
 }
 

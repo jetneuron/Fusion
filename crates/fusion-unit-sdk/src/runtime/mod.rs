@@ -1,12 +1,17 @@
 use crate::graph::types::ComputingUnit;
 use crate::runtime::logical::LogicalTask;
+use crate::runtime::script::Scripter;
 use anyhow::Error;
 use serde::{Serialize, Serializer};
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use crate::runtime::state::GraphStates;
 
 pub mod logical;
+pub mod script;
+pub mod script_engine_factory;
+pub mod state;
 
 pub trait TaskFactoryType: Any + Send + Sync {
     fn create() -> Box<dyn TaskFactoryType>
@@ -15,13 +20,17 @@ pub trait TaskFactoryType: Any + Send + Sync {
     fn as_any(&self) -> &dyn Any;
 }
 
+lazy_static::lazy_static! {
+    pub static ref GLOBAL_REGISTRY: TypeRegistry = TypeRegistry::new();
+}
+
 pub struct TypeRegistry {
     pub registry:
         Mutex<HashMap<String, fn(unit: ComputingUnit) -> UnitResult<Box<dyn LogicalTask + Send>>>>,
 }
 
-lazy_static::lazy_static! {
-    pub static ref GLOBAL_REGISTRY: TypeRegistry = TypeRegistry::new();
+pub struct ScripterRegistry {
+    pub registry: Mutex<HashMap<String, fn(script_type: String, states: GraphStates) -> Box<dyn Scripter + Send>>>,
 }
 
 impl TypeRegistry {
@@ -57,6 +66,34 @@ impl TypeRegistry {
         map.shrink_to_fit();
     }
 }
+//
+// impl ScripterRegistry {
+//     pub fn new() -> Self {
+//         Self {
+//             registry: Mutex::new(HashMap::new()),
+//         }
+//     }
+//
+//     pub fn register<T: Scripter + 'static>(&self, name: &str) {
+//         let mut registry = self.registry.lock().unwrap();
+//         registry.insert(name.to_string(), |script, states| T::create(script, states));
+//     }
+//
+//     pub fn create(
+//         &self,
+//         script_type_name: &String,
+//         origin_script: String,
+//         states: GraphStates,
+//     ) -> UnitResult<Box<dyn Scripter + Send>> {
+//         let registry = self.registry.lock().unwrap();
+//         if let Some(script_factory) = registry.get(script_type_name) {
+//             let script = script_factory(origin_script, states);
+//             Ok(script)
+//         } else {
+//             Err(UnitError::ScriptInitErr(script_type_name.to_string()))
+//         }
+//     }
+// }
 
 #[derive(Debug, thiserror::Error)]
 pub enum UnitError {
@@ -74,6 +111,8 @@ pub enum UnitError {
     InvalidateRowFormat(String),
     #[error("Panic occur in physical task: {0}")]
     PhysicalTaskErr(String),
+    #[error("Fail to initialize script engine: {0}")]
+    ScriptInitErr(String),
 }
 
 impl UnitError {

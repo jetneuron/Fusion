@@ -1,8 +1,10 @@
 use crate::graph::core::{LogicalGraph, PetGraph};
 use crate::runtime::physical::PhysicalTask;
 use crate::runtime::plugin::PluginManager;
+use crate::runtime::scripts::{GraphLua, GraphTera};
 use fusion_unit_sdk::graph::types::{EdgeCondition, EdgeConfig, TaskContext, Watermark};
 use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
+use fusion_unit_sdk::runtime::state::GraphStates;
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use itertools::{cloned, Itertools};
 use log::{debug, info, log, trace};
@@ -151,12 +153,6 @@ impl LaunchEnv {
     }
 }
 
-#[derive(Default)]
-pub(crate) struct GraphContext {
-    pub(crate) lua: Arc<Mutex<Lua>>,
-    pub(crate) tera: Arc<Mutex<Tera>>,
-}
-
 pub struct PhysicalGraph {
     pub(crate) logical_graph: LogicalGraph,
     pub(crate) plugin_manager: Arc<Mutex<PluginManager>>,
@@ -197,11 +193,11 @@ impl PhysicalGraph {
             trace!("{}", self.logical_graph.to_yaml().unwrap());
         }
 
+        let graph_id = self.logical_graph.get_id();
         let mut pet_graph: PetGraph = (&self.logical_graph).clone().into();
-        let mut context = GraphContext::default();
-        context.lua = Arc::clone(&self.graph_lua);
-
-        let graph_context = Arc::new(Mutex::new(context));
+        let states = GraphStates::new(graph_id);
+        states.register(GraphLua(self.graph_lua.clone()))?;
+        states.register(GraphTera(self.tera.clone()))?;
 
         let start_nodes: Vec<NodeIndex> = pet_graph
             .node_indices()
@@ -244,6 +240,7 @@ impl PhysicalGraph {
                         unit.replace_config(runtime_config);
                     }
 
+                    unit.with_states(states.clone());
                     let cloned_unit = unit.clone();
                     mgr.create_logical_task(cloned_unit).await?
                 };
@@ -261,11 +258,8 @@ impl PhysicalGraph {
                         )
                     }
                 };
-                let physical: PhysicalTask = PhysicalTask::new_with_watermark(
-                    logical_task,
-                    watermark,
-                    graph_context.clone(),
-                );
+                let physical: PhysicalTask =
+                    PhysicalTask::new_with_watermark(logical_task, watermark, states.clone());
                 physical.update_unit(unit.clone()).await;
                 physical.init_script_env().await;
                 physical_map.insert(index, Arc::new(Mutex::new(physical)));

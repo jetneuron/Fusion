@@ -4,37 +4,7 @@ use proc_macro::TokenStream;
 
 use quote::quote;
 use syn;
-
-#[proc_macro_derive(UnitTask)]
-pub fn unittask_trait_derive(input: TokenStream) -> TokenStream {
-    // 解析输入的Rust代码
-    let ast = syn::parse(input).unwrap();
-
-    // 构建trait实现
-    impl_my_trait(&ast)
-}
-
-fn impl_my_trait(ast: &syn::DeriveInput) -> TokenStream {
-    let name = &ast.ident;
-    let r#gen = quote! {
-        // impl crate::task::UnitTask for #name {
-        //     fn new(unit: ComputingUnit) -> Self {
-        //         let mut task = #name::default();
-        //         let mut core = TaskCore::new(unit.get_id());
-        //         core.set_unit(unit.clone());
-        //         task.core = core;
-        //         task.init(&unit);
-        //         task
-        //     }
-        //
-        //     fn get_core(&self) -> &TaskCore {
-        //         &self.core
-        //     }
-        // }
-
-    };
-    r#gen.into()
-}
+use syn::{parse_macro_input, DeriveInput, Expr, Lit, Meta};
 
 #[proc_macro_derive(LogicalTask)]
 pub fn logical_task_derive(input: TokenStream) -> TokenStream {
@@ -159,6 +129,16 @@ fn impl_logical_task_trait(ast: &syn::DeriveInput, tp: i32) -> TokenStream {
     };
 
     let token_stream = quote! {
+        impl fusion_unit_sdk::runtime::logical::LogicalTaskMeta for #struct_name {
+            fn get_id(&self) -> String {
+                self.meta.get_id()
+            }
+
+            fn set_id(&mut self, id: fusion_unit_sdk::graph::types::UnitIdx) {
+                self.meta.set_id(id);
+            }
+        }
+
         impl fusion_unit_sdk::runtime::logical::LogicalTask for #struct_name {
 
             fn create(unit: fusion_unit_sdk::graph::types::ComputingUnit) -> fusion_unit_sdk::runtime::UnitResult<Box<dyn fusion_unit_sdk::runtime::logical::LogicalTask + ::core::marker::Send>>
@@ -213,4 +193,81 @@ fn impl_logical_task_trait(ast: &syn::DeriveInput, tp: i32) -> TokenStream {
         }
     };
     token_stream.into()
+}
+
+#[proc_macro_derive(ScriptEngine, attributes(script_type))]
+pub fn derive_factory(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+
+    let struct_name = &input.ident;
+
+    // 获取 script_type 属性值
+    let script_type =
+        get_script_type_name(&input).unwrap_or_else(|| "struct_name.to_string()".to_string());
+
+    let expanded = quote! {
+        // 自动实现 Factory trait
+        impl fusion_unit_sdk::runtime::script_engine_factory::ScriptEngineFactory for #struct_name {
+            fn name() -> &'static str {
+                #script_type
+            }
+
+            fn create_scripter(origin_script: String, states: fusion_unit_sdk::runtime::state::GraphStates) -> anyhow::Result<Box<dyn fusion_unit_sdk::runtime::script::Scripter + Send>>
+            where
+                Self: Sized + 'static,
+            {
+                Self::create(origin_script, states)
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+fn get_script_type_name(input: &DeriveInput) -> Option<String> {
+    for attr in &input.attrs {
+        if !attr.path().is_ident("script_type") {
+            continue;
+        }
+
+        match &attr.meta {
+            // #[script_type = "value"]
+            Meta::NameValue(name_value) => {
+                if let Expr::Lit(expr_lit) = &name_value.value {
+                    if let Lit::Str(lit_str) = &expr_lit.lit {
+                        return Some(lit_str.value());
+                    }
+                }
+            }
+            // #[script_type("value")]
+            Meta::List(meta_list) => {
+                // 直接解析 token 流
+                let tokens = meta_list.tokens.clone();
+                let mut iter = tokens.into_iter();
+
+                // 跳过可能的 punct 和 group
+                while let Some(token) = iter.next() {
+                    match token {
+                        proc_macro2::TokenTree::Literal(lit) => {
+                            let s = lit.to_string();
+                            if s.starts_with('"') && s.ends_with('"') {
+                                return Some(s[1..s.len() - 1].to_string());
+                            }
+                        }
+                        proc_macro2::TokenTree::Punct(p) if p.as_char() == '=' => {
+                            // 跳过等号，继续查找字面量
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            // #[script_type]
+            Meta::Path(_) => {
+                // 没有值，返回 None 让调用者使用默认值
+                return None;
+            }
+        }
+    }
+    None
 }

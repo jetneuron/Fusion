@@ -8,10 +8,11 @@ use calamine::{
 };
 use fusion_derive::LogicalTask;
 use fusion_unit_sdk::graph::types::{
-    ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext, UnitConfig,
+    ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext, UnitConfig, UnitMeta,
 };
 use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
 use fusion_unit_sdk::row::types::ColumnDescriptor;
+use fusion_unit_sdk::runtime::logical::LogicalTaskMeta;
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use fusion_unit_sdk::units::config_util::UnitConfigExt;
 use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
@@ -54,6 +55,7 @@ impl GraphUnitPlugin for ExcelUnitPlugin {
 /// [rustxlsxwriter](https://rustxlsxwriter.github.io/index.html)
 #[derive(Default, LogicalTask)]
 pub struct SpreadSheetUnitTask {
+    meta: UnitMeta,
     /// file path to read
     path: String,
     /// skip rows
@@ -80,7 +82,7 @@ impl SpreadSheetUnitTask {
             let mut tmp_fields = vec![];
             for item in s {
                 let len = tmp_fields.len();
-                let mut descriptor = ColumnDescriptor::new();
+                let mut descriptor = ColumnDescriptor::default();
                 descriptor.name = item["name"]
                     .as_str()
                     .map_or_else(|| format!("c{}", len), |s| String::from(s));

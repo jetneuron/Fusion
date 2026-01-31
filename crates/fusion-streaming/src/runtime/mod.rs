@@ -8,6 +8,7 @@ pub mod core;
 pub mod physical;
 pub mod plugin;
 pub mod sandbox;
+pub(crate) mod scripts;
 
 lazy_static! {
     pub static ref PRODUCT_NAME: String = "FusionPro".to_string();
