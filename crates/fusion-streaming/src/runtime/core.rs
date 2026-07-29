@@ -2,11 +2,12 @@ use crate::graph::core::{LogicalGraph, PetGraph};
 use crate::runtime::physical::PhysicalTask;
 use crate::runtime::plugin::PluginManager;
 use crate::runtime::scripts::{GraphLua, GraphTera};
+use deno_core::JsRuntime;
 use fusion_unit_sdk::graph::types::{EdgeCondition, EdgeConfig, TaskContext, Watermark};
 use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
 use fusion_unit_sdk::runtime::state::GraphStates;
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
-use itertools::{cloned, Itertools};
+use itertools::{Itertools, cloned};
 use log::{debug, info, log, trace};
 use mlua::ffi::lua;
 use mlua::{FromLua, Lua, Table, UserData, UserDataMethods, Value};
@@ -158,6 +159,7 @@ pub struct PhysicalGraph {
     pub(crate) plugin_manager: Arc<Mutex<PluginManager>>,
     pub(crate) graph_lua: Arc<Mutex<Lua>>,
     pub(crate) tera: Arc<Mutex<Tera>>,
+    // pub(crate) typescript: Arc<Mutex<JsRuntime>>,
 }
 
 impl PhysicalGraph {
@@ -166,12 +168,14 @@ impl PhysicalGraph {
         plugin_manager: Arc<Mutex<PluginManager>>,
         graph_lua: Arc<Mutex<Lua>>,
         tera: Arc<Mutex<Tera>>,
+        typescript: Arc<Mutex<JsRuntime>>,
     ) -> Self {
         PhysicalGraph {
             logical_graph,
             plugin_manager,
             graph_lua,
             tera,
+            // typescript,
         }
     }
 
@@ -198,6 +202,7 @@ impl PhysicalGraph {
         let states = GraphStates::new(graph_id);
         states.register(GraphLua(self.graph_lua.clone()))?;
         states.register(GraphTera(self.tera.clone()))?;
+        //states.register(GraphJavascript(self.typescript.clone()))?;
 
         let start_nodes: Vec<NodeIndex> = pet_graph
             .node_indices()

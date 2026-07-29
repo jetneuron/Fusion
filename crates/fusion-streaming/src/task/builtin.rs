@@ -131,12 +131,13 @@ impl InitUnit for MapUnitTask {
     fn init(&mut self, unit: ComputingUnit) -> UnitResult<()> {
         let conf = unit.get_config();
         if let Some(result) = conf.map::<UnitResult<()>, _>(|c| {
-            let script = c.require_string("script")?;
+            let script = c.require_string("$script")?;
             let states = unit
                 .get_runtime_states()
                 .ok_or_else(|| UnitError::ScriptInitErr(String::from("runtime states unready")))?;
             let script_type = c
-                .extract_string("script_type")?
+                .extract_string("$script_type")?
+                .map(|v| v.to_lowercase())
                 .unwrap_or_else(|| String::from("lua"));
 
             self.scripter = Some(script_registry::create_scripter(

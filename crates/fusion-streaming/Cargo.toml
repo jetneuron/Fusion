@@ -44,10 +44,12 @@ jsonpath-rust = "0.7.3"
 itertools = "0.13.0"
 uuid = { version = "1.11.0", features = ["v4"] }
 linkme = "0.3.35"
+deno_core = "0.382.0"
 
 # ================= PROJECT DEPENDENCES START =================
 fusion-derive = { path = "../fusion-derive" }
 fusion-unit-sdk = { path = "../fusion-unit-sdk" }
+fusion-script-ts = { path = "../scripts/fusion-script-ts"}
 # ================== PROJECT DEPENDENCES END ==================
 
 [build-dependencies]
