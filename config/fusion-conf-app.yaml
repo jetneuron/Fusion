@@ -1,0 +1,18 @@
+# Fusion App Mode Configuration
+# Used when Fusion is embedded in a desktop application (e.g. Tauri).
+# This file is bundled as an application resource.
+
+# Run mode: singleton | cluster
+mode: singleton
+
+# Dynamic library search paths.
+# Multiple directories are scanned in order; the first matching
+# library wins when duplicates exist.
+libs:
+  # Capability plugin dylibs (implementations of KeyValueStore, SqlQueryEngine, ...)
+  capability:
+    - assets/libs/capability
+
+  # Unit plugin dylibs (custom task types)
+  unit:
+    - assets/libs/unit

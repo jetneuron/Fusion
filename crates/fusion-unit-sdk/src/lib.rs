@@ -4,6 +4,8 @@ use crate::runtime::{UnitResult, GLOBAL_REGISTRY};
 use std::collections::HashSet;
 use std::hash::Hash;
 
+pub mod capability;
+pub mod config;
 pub mod error;
 pub mod graph;
 pub mod proto;

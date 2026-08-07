@@ -27,3 +27,12 @@ Cargo.lock
 
 # unit test case output resource
 crates/fusion-unit-tests/tests/output
+
+app/yarn.lock
+app/.yarn/**
+app/node_modules
+app/target
+app/assets/libs/capability/lib*
+app/assets/libs/unit/lib*
+
+tmp

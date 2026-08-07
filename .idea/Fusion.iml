@@ -21,6 +21,22 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/scripts/fusion-script-ts/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/scripts/fusion-script-ts/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/fusion-unit-net/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/capability/fusion-capability-example/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/fusion-runtime/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/fusion-runtime/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/fusion-plugins/capability/fusion-capability-example/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/fusion-plugins/units/fusion-unit-datafusion/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/fusion-plugins/units/fusion-unit-datafusion/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/fusion-plugins/units/fusion-unit-excel/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/fusion-plugins/units/fusion-unit-excel/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/fusion-plugins/units/fusion-unit-net/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/fusion-plugins/units/fusion-unit-redis/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/fusion-plugins/units/fusion-unit-ssh/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/fusion-plugins/units/fusion-unit-ssh/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/fusion-plugins/units/fusion-unit-universal-fs/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/fusion-plugins/units/fusion-unit-universal-fs/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/tests/fusion-unit-tests/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/tests/fusion-unit-tests/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

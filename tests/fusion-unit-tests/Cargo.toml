@@ -1,0 +1,28 @@
+[package]
+name = "fusion-unit-tests"
+version = "0.1.0"
+authors.workspace = true
+homepage.workspace = true
+edition.workspace = true
+
+[dependencies]
+# core graph computing
+# unit sdk
+fusion-unit-sdk = { path = "../../crates/fusion-unit-sdk" }
+libloading = "0.8.6"
+serde_json = "1.0.134"
+# unit extension plugins.
+fusion-unit-datafusion = { path = "../../crates/fusion-plugins/units/fusion-unit-datafusion" }
+fusion-unit-excel = { path = "../../crates/fusion-plugins/units/fusion-unit-excel" }
+fusion-unit-ssh = { path = "../../crates/fusion-plugins/units/fusion-unit-ssh" }
+fusion-unit-universal-fs = { path = "../../crates/fusion-plugins/units/fusion-unit-universal-fs" }
+anyhow = "1.0.100"
+log = "0.4.29"
+
+[dependencies.fusion-streaming]
+path = "../../crates/fusion-streaming"
+features = ["common", "trace-physical"]
+
+[dev-dependencies]
+tokio = "1.42.0"
+env_logger = "0.11.6"

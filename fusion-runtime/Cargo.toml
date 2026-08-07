@@ -1,0 +1,46 @@
+[package]
+name = "fusion-runtime"
+version = "0.1.0"
+authors.workspace = true
+homepage.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+unit-datafusion = ["fusion-unit-datafusion"]
+unit-excel = ["fusion-unit-excel"]
+unit-ssh = ["fusion-unit-ssh"]
+unit-redis = ["fusion-unit-redis"]
+unit-net = ["fusion-unit-net"]
+unit-universal-fs = ["fusion-unit-universal-fs"]
+all-units = [
+    "unit-datafusion",
+    "unit-excel",
+    "unit-ssh",
+    "unit-redis",
+    "unit-net",
+    "unit-universal-fs",
+]
+
+[dependencies]
+fusion-streaming = { workspace = true }
+fusion-unit-sdk = { workspace = true }
+tokio = { version = "1.48.0", features = ["full"] }
+mlua = { version = "0.10.2", features = ["lua54", "send", "async"] }
+tera = "1.20.0"
+anyhow = "1.0.100"
+log = "0.4.22"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+libloading = "0.8.6"
+
+fusion-unit-datafusion = { workspace = true, optional = true }
+fusion-unit-excel = { workspace = true, optional = true }
+fusion-unit-ssh = { workspace = true, optional = true }
+fusion-unit-redis = { workspace = true, optional = true }
+fusion-unit-net = { workspace = true, optional = true }
+fusion-unit-universal-fs = { workspace = true, optional = true }
+
+[dev-dependencies]
+env_logger = "0.11.6"
+serde_json = "1.0.134"

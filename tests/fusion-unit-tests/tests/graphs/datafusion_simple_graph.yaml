@@ -1,0 +1,56 @@
+name: example_graph
+
+units:
+  - id: uid1
+    name: input_node
+    type: SpreadSheetUnitTask
+    config:
+      path: "{{CARGO_MANIFEST_DIR}}/tests/data/test_skin_attribute_data.xlsx"
+      sheet_name: "Sheet1"
+      field_name_row_index: 1
+      skip_rows: 3
+#      field_names:
+#        - name: "foo1"
+#          data_type: i32
+#        - name: "bar"
+#          data_type: str
+
+  - id: df
+    name: datafusion
+    type: DataFusionUnit
+    config:
+      sql: |
+        select ups.itemPurchase, ups.debrisNum, ups.skillIdWeight, csv.*, this.* from ups, this, csv
+        where ups.id = this.id
+          and this.id = csv.A
+      local:
+        - name: this
+          format: parquet
+          paths:
+            - "{{CARGO_MANIFEST_DIR}}/tests/data/alltypes_plain.parquet"
+        - name: csv
+          format: csv
+          paths:
+            - "{{CARGO_MANIFEST_DIR}}/tests/data/capitalized_example.csv"
+      external:
+        - name: ups
+          source: uid1
+
+  - id: uid2
+    name: output_node
+    type: DebugOutputUnitTask
+    config:
+      foo2: bar2
+      int_field: 1.32
+
+edges:
+  - id: eid1
+    source: uid1
+    target: df
+    config:
+      fee: bee
+  - id: eid2
+    source: df
+    target: uid2
+    config:
+      fee: bee

@@ -2,7 +2,6 @@ use crate::graph::core::{LogicalGraph, PetGraph};
 use crate::runtime::physical::PhysicalTask;
 use crate::runtime::plugin::PluginManager;
 use crate::runtime::scripts::{GraphLua, GraphTera};
-use deno_core::JsRuntime;
 use fusion_unit_sdk::graph::types::{EdgeCondition, EdgeConfig, TaskContext, Watermark};
 use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
 use fusion_unit_sdk::runtime::state::GraphStates;
@@ -168,14 +167,12 @@ impl PhysicalGraph {
         plugin_manager: Arc<Mutex<PluginManager>>,
         graph_lua: Arc<Mutex<Lua>>,
         tera: Arc<Mutex<Tera>>,
-        typescript: Arc<Mutex<JsRuntime>>,
     ) -> Self {
         PhysicalGraph {
             logical_graph,
             plugin_manager,
             graph_lua,
             tera,
-            // typescript,
         }
     }
 

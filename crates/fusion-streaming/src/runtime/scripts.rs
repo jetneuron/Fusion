@@ -1,5 +1,4 @@
 use crate::runtime::core::{LuaContext, LuaRow};
-use deno_core::JsRuntime;
 use fusion_derive::ScriptEngine;
 use fusion_unit_sdk::graph::types::{TaskContext, UnitIdx};
 use fusion_unit_sdk::proto::transfer::Row;

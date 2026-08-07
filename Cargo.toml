@@ -6,15 +6,32 @@ edition = "2024"
 [workspace]
 members = [
     "crates/fusion-derive",
+    "fusion-runtime",
     "crates/fusion-streaming",
-    "crates/fusion-unit-datafusion",
-    "crates/fusion-unit-excel", "crates/fusion-unit-net", "crates/fusion-unit-redis",
     "crates/fusion-unit-sdk",
-    "crates/fusion-unit-ssh",
-    "crates/fusion-unit-tests",
-    "crates/fusion-unit-universal-fs",
+    "tests/fusion-unit-tests",
+    "crates/fusion-plugins/capability/fusion-capability-example",
+    "crates/fusion-plugins/units/fusion-unit-datafusion",
+    "crates/fusion-plugins/units/fusion-unit-excel",
+    "crates/fusion-plugins/units/fusion-unit-net",
+    "crates/fusion-plugins/units/fusion-unit-redis",
+    "crates/fusion-plugins/units/fusion-unit-ssh",
+    "crates/fusion-plugins/units/fusion-unit-universal-fs",
     "crates/scripts/fusion-script-ts"]
 resolver = "3"
+
+[workspace.dependencies]
+fusion-streaming = { path = "crates/fusion-streaming" }
+fusion-unit-sdk = { path = "crates/fusion-unit-sdk" }
+fusion-unit-datafusion = { path = "crates/fusion-plugins/units/fusion-unit-datafusion" }
+fusion-unit-excel = { path = "crates/fusion-plugins/units/fusion-unit-excel" }
+fusion-unit-ssh = { path = "crates/fusion-plugins/units/fusion-unit-ssh" }
+fusion-unit-redis = { path = "crates/fusion-plugins/units/fusion-unit-redis" }
+fusion-unit-net = { path = "crates/fusion-plugins/units/fusion-unit-net" }
+fusion-unit-universal-fs = { path = "crates/fusion-plugins/units/fusion-unit-universal-fs" }
+fusion-derive = { path = "crates/fusion-derive" }
+fusion-script-ts = { path = "crates/scripts/fusion-script-ts" }
+fusion-capability-example = { path = "crates/fusion-plugins/capability/fusion-capability-example" }
 
 [profile.dev]
 debug = true

@@ -1,0 +1,18 @@
+# Fusion Server Mode Configuration
+# Used for server-side / cluster deployments.
+
+# Run mode: singleton | cluster
+mode: cluster
+
+# Dynamic library search paths.
+# Ordered — the first matching library wins when duplicates exist.
+libs:
+  # Capability plugin dylibs
+  capability:
+    - /opt/fusion/libs/capability
+    - /usr/local/lib/fusion/capability
+
+  # Unit plugin dylibs
+  unit:
+    - /opt/fusion/libs/unit
+    - /usr/local/lib/fusion/unit

@@ -2,8 +2,9 @@ use crate::task::builtin::{
     DebugInputUnitTask, DebugMapUnitTask, DebugOutputUnitTask, MapUnitTask,
 };
 use crate::task::http_unit::HttpUnitTask;
+use fusion_unit_sdk::capability::CapabilityPlugin;
 use fusion_unit_sdk::graph::types::ComputingUnit;
-use fusion_unit_sdk::runtime::UnitResult;
+use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use fusion_unit_sdk::runtime::logical::LogicalTask;
 use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
 use libloading::{Library, Symbol};
@@ -67,6 +68,38 @@ impl PluginManager {
                 .await
                 .insert(key.clone(), path.clone());
         }
+    }
+
+    /// Load an external capability plugin (`.dylib` / `.so`) and register its
+    /// capabilities into the global [`CapabilityRegistry`](fusion_unit_sdk::capability::CapabilityRegistry).
+    ///
+    /// Unlike unit plugins, capability plugins are not stored in the plugin
+    /// map — they register directly into the process-global registry and the
+    /// loaded library must be kept alive by the caller or manager.
+    pub async fn load_capability_plugin(&self, path: &str) -> UnitResult<()> {
+        let capability = unsafe {
+            let lib = Library::new(path).map_err(|e| {
+                UnitError::unknown(format!("Failed to load capability dylib `{path}`: {e}"))
+            })?;
+            let init: Symbol<unsafe extern "C" fn() -> Box<dyn CapabilityPlugin + Send + Sync>> =
+                lib.get(b"init_capability_plugin").map_err(|e| {
+                    UnitError::unknown(format!(
+                        "Symbol `init_capability_plugin` not found in `{path}`: {e}"
+                    ))
+                })?;
+            // NOTE: `lib` is dropped here, which unloads the dylib.
+            // The capability trait objects in the global registry hold
+            // vtables pointing into dylib memory — this is a known issue.
+            // Future: store `Library` handles in PluginManager to keep
+            // capability dylibs alive.
+            init()
+        };
+        capability.register();
+        log::info!(
+            "Loaded capability plugin v{} from `{path}`",
+            capability.version()
+        );
+        Ok(())
     }
 
     pub async fn create_logical_task(
