@@ -11,6 +11,7 @@ use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use fusion_unit_sdk::units::compute_unit::UnitLifeCycle;
 use log::{debug, error, trace, warn};
 use mlua::Function;
+use std::collections::{HashMap, HashSet};
 use std::panic;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -27,6 +28,25 @@ pub struct PhysicalTask {
     pub(crate) stats: Stats,
     /// states manager
     pub(crate) states: GraphStates,
+    /// Barrier tracking for fan-in nodes. None for non-fan-in nodes.
+    pub(crate) barrier_tracker: Option<Arc<Mutex<BarrierTracker>>>,
+}
+
+/// Tracks per-offset barrier completion for fan-in nodes.
+#[derive(Default)]
+pub(crate) struct BarrierTracker {
+    /// Set of upstream node IDs this node expects barriers from.
+    pub(crate) expected_sources: HashSet<String>,
+    /// Pending groups keyed by barrier reference offset.
+    pub(crate) groups: HashMap<u64, BarrierGroup>,
+}
+
+#[derive(Default)]
+pub(crate) struct BarrierGroup {
+    /// Upstream sources that have sent their barrier for this offset.
+    pub(crate) barriers_received: HashSet<String>,
+    /// Data rows buffered until all barriers arrive.
+    pub(crate) buffered_rows: Vec<Row>,
 }
 
 #[derive(Default)]
@@ -63,7 +83,19 @@ impl PhysicalTask {
             core: Arc::new(Mutex::new(TaskCore::new(time.to_string(), watermark))),
             stats: Stats::default(),
             states,
+            barrier_tracker: None,
         }
+    }
+
+    /// Enable barrier tracking for this node (called when incoming > 1).
+    pub(crate) fn set_barrier_tracking(
+        &mut self,
+        expected_sources: HashSet<String>,
+    ) {
+        self.barrier_tracker = Some(Arc::new(Mutex::new(BarrierTracker {
+            expected_sources,
+            groups: HashMap::new(),
+        })));
     }
 
     /// update computing unit data into current physical task.
@@ -248,24 +280,20 @@ impl PhysicalTask {
                 )
             };
 
-            let ch = {
+            let (data_sender, target_id, context, internal_sender, watermark) = {
                 let target_physical = target_cloned.lock().await;
                 let target_core = target_physical.core.lock().await;
                 let internal_sender = target_core.channel.internal_sender();
                 let watermark = target_core.get_watermark();
 
                 let target_unit = (&target_core).unit.clone().expect("Failed to get unit");
-                (
-                    target_unit,
-                    target_core.channel.internal_channel.0.clone(),
-                    internal_sender.clone(),
-                    watermark.clone(),
-                )
+                let raw_data_sender = target_core.channel.internal_channel.0.clone();
+                let target_id = target_unit.get_id().clone();
+                let context =
+                    TaskContext::new(target_unit, raw_data_sender.clone(), watermark.clone(), states.clone());
+                (raw_data_sender, target_id, context, internal_sender.clone(), watermark.clone())
             };
-            let target_id = ch.0.get_id().clone();
-            let context = TaskContext::new(ch.0, ch.1, ch.3.clone(), states.clone());
-            let internal_sender = ch.2;
-            let watermark = ch.3;
+
             let self_id = receiver.0.clone();
 
             #[cfg(feature = "trace-physical")]
@@ -293,6 +321,68 @@ impl PhysicalTask {
                             started = true;
                         }
 
+                        // ── Barrier handling (fan-in synchronization) ──
+                        if row.is_barrier() {
+                            let barrier_offset = row.offset;
+                            let barrier_source = row.source.clone();
+
+                            // Check whether the target is a fan-in node.
+                            let is_fan_in = {
+                                let target_physical = target_cloned.lock().await;
+                                target_physical.barrier_tracker.is_some()
+                            };
+
+                            if is_fan_in {
+                                let target_physical = target_cloned.lock().await;
+                                let tracker = target_physical.barrier_tracker.as_ref().unwrap();
+                                let mut t = tracker.lock().await;
+                                let expected = t.expected_sources.len();
+                                let group = t.groups.entry(barrier_offset).or_default();
+                                group.barriers_received.insert(barrier_source);
+
+                                if group.barriers_received.len() == expected {
+                                    // All barriers received — flush buffered rows.
+                                    let buffered =
+                                        std::mem::take(&mut group.buffered_rows);
+                                    t.groups.remove(&barrier_offset);
+                                    drop(t);
+                                    drop(target_physical);
+
+                                    for data_row in buffered {
+                                        context
+                                            .sender
+                                            .set_barrier_ref(data_row.barrier_ref);
+                                        target_cloned
+                                            .lock()
+                                            .await
+                                            .compute(data_row, context.clone())
+                                            .await
+                                            .expect("fail to compute fan-in flush");
+                                    }
+                                    // Forward barrier downstream.
+                                    data_sender
+                                        .send(Row::barrier(
+                                            target_id.clone(),
+                                            barrier_offset,
+                                        ))
+                                        .ok();
+                                }
+                                // else: not yet complete — don't forward yet.
+                            } else {
+                                // Non-fan-in node: forward barrier downstream unchanged.
+                                data_sender
+                                    .send(Row::barrier(target_id.clone(), barrier_offset))
+                                    .ok();
+                            }
+
+                            // Barrier received; watermark feedback for tracking.
+                            internal_sender
+                                .send(Row::watermark(self_id.clone(), barrier_offset))
+                                .ok();
+                            continue;
+                        }
+
+                        // ── EOF ──
                         if row.is_eof() {
                             let eof_source = row.source.clone();
                             let finished = {
@@ -323,35 +413,69 @@ impl PhysicalTask {
                                 "task [{self_id}] received EOF from [{eof_source}], task finished NORMAL"
                             );
                             break;
+                        }
+
+                        // ── Data row ──
+                        let recv_offset = row.offset;
+                        let recv_barrier_ref = row.barrier_ref;
+
+                        // Check fan-in buffering on target.
+                        {
+                            let target_physical = target_cloned.lock().await;
+                            if let Some(tracker) = &target_physical.barrier_tracker {
+                                let mut t = tracker.lock().await;
+                                let expected = t.expected_sources.len();
+                                let group = t.groups.entry(recv_barrier_ref).or_default();
+                                // Still waiting for barriers on this group — buffer.
+                                if group.barriers_received.len() < expected {
+                                    group.buffered_rows.push(row);
+                                    continue;
+                                }
+                            }
+                        }
+
+                        // Propagate barrier_ref so downstream nodes can
+                        // group rows correctly. Source nodes leave it at 0,
+                        // so use offset as the group key for the first level.
+                        let group_key = if recv_barrier_ref > 0 {
+                            recv_barrier_ref
                         } else {
-                            let recv_offset = row.offset;
-                            if edge_filter_fn.is_none() {
+                            recv_offset
+                        };
+                        context.sender.set_barrier_ref(group_key);
+
+                        if edge_filter_fn.is_none() {
+                            let target_physical_task = target_cloned.lock().await;
+                            target_physical_task
+                                .compute(row, context.clone())
+                                .await
+                                .expect("fail to compute");
+                        } else {
+                            let filter = edge_filter_fn.as_ref().unwrap();
+                            let matched = {
+                                let row_arc = Arc::new(Mutex::new(row));
+                                let lua_row = LuaRow::wrap(row_arc.clone()).await;
+                                row = row_arc.lock().await.to_owned();
+                                filter.call::<bool>(lua_row).unwrap_or(true)
+                            };
+
+                            if matched {
                                 let target_physical_task = target_cloned.lock().await;
                                 target_physical_task
                                     .compute(row, context.clone())
                                     .await
                                     .expect("fail to compute");
-                            } else {
-                                let filter = edge_filter_fn.as_ref().unwrap();
-                                let matched = {
-                                    let row_arc = Arc::new(Mutex::new(row));
-                                    let lua_row = LuaRow::wrap(row_arc.clone()).await;
-                                    row = row_arc.lock().await.to_owned();
-                                    filter.call::<bool>(lua_row).unwrap_or(true)
-                                };
-
-                                if matched {
-                                    let target_physical_task = target_cloned.lock().await;
-                                    target_physical_task
-                                        .compute(row, context.clone())
-                                        .await
-                                        .expect("fail to compute");
-                                }
                             }
-                            internal_sender
-                                .send(Row::watermark(self_id.clone(), recv_offset))
-                                .unwrap();
                         }
+
+                        // Inject barrier after compute completes for this upstream row.
+                        data_sender
+                            .send(Row::barrier(target_id.clone(), group_key))
+                            .ok();
+
+                        internal_sender
+                            .send(Row::watermark(self_id.clone(), recv_offset))
+                            .unwrap();
                     }
                     Err(broadcast::error::RecvError::Lagged(count)) => {
                         println!("消费滞后：{}", count);

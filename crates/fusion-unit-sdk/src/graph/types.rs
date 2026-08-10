@@ -327,6 +327,8 @@ pub struct BackpressureSender {
     sender: Box<Sender<Row>>,
     offset: Arc<std::sync::Mutex<u64>>,
     watermark: Arc<RwLock<Watermark>>,
+    /// Current barrier_ref — set by engine before compute, applied to every emitted row.
+    barrier_ref: Arc<std::sync::Mutex<u64>>,
 }
 
 impl BackpressureSender {
@@ -336,7 +338,15 @@ impl BackpressureSender {
             sender: Box::new(sender),
             offset: Arc::new(std::sync::Mutex::new(0)),
             watermark,
+            barrier_ref: Arc::new(std::sync::Mutex::new(0)),
         }
+    }
+
+    /// Set the barrier reference for the next computation batch.
+    /// Called by the engine forwarding task before target.compute().
+    pub fn set_barrier_ref(&self, r: u64) {
+        let mut br = self.barrier_ref.lock().unwrap();
+        *br = r;
     }
 
     /// send row data with backpressure.
@@ -355,6 +365,10 @@ impl BackpressureSender {
         }
 
         row.source = self.id.clone();
+        row.barrier_ref = {
+            let br = self.barrier_ref.lock().unwrap();
+            *br
+        };
         let offset = {
             let mut offset_val = self.offset.lock().unwrap();
             *offset_val += 1;

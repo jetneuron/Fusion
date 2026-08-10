@@ -260,10 +260,21 @@ impl PhysicalGraph {
                         )
                     }
                 };
-                let physical: PhysicalTask =
+                let mut physical: PhysicalTask =
                     PhysicalTask::new_with_watermark(logical_task, watermark, states.clone());
                 physical.update_unit(unit.clone()).await;
                 physical.init_script_env().await;
+
+                // Set up barrier tracking for fan-in nodes (incoming > 1).
+                let incoming_sources: HashSet<String> = pet_graph
+                    .neighbors_directed(index, petgraph::Direction::Incoming)
+                    .filter_map(|n| pet_graph.node_weight(n))
+                    .map(|u| u.get_id().clone())
+                    .collect();
+                if incoming_sources.len() > 1 {
+                    physical.set_barrier_tracking(incoming_sources);
+                }
+
                 physical_map.insert(index, Arc::new(Mutex::new(physical)));
             }
         }

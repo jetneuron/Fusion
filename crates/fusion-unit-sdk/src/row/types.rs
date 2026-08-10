@@ -29,10 +29,12 @@ impl Row {
         row
     }
 
-    /// create `BARRIER` mask row.
-    pub fn barrier() -> Row {
+    /// create `BARRIER` mask row with source and barrier reference offset.
+    pub fn barrier(source: String, offset: u64) -> Row {
         let mut row = Row::new();
         row.mask = ROW_MASK_BARRIER;
+        row.source = source;
+        row.offset = offset;
         row
     }
 

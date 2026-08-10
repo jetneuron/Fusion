@@ -50,6 +50,10 @@ pub struct Row {
     ///  raw data
     // @@protoc_insertion_point(field:transfer.Row.raw)
     pub raw: ::std::vec::Vec<u8>,
+    /// *
+    ///  barrier reference offset — groups rows from fan-out paths
+    // @@protoc_insertion_point(field:transfer.Row.barrier_ref)
+    pub barrier_ref: u64,
     // special fields
     // @@protoc_insertion_point(special_field:transfer.Row.special_fields)
     pub special_fields: ::protobuf::SpecialFields,
@@ -208,6 +212,7 @@ impl ::protobuf::Message for Row {
             mask: 0,
             source: ::std::string::String::new(),
             raw: ::std::vec::Vec::new(),
+            barrier_ref: 0,
             special_fields: ::protobuf::SpecialFields::new(),
         };
         &instance

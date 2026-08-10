@@ -40,8 +40,8 @@ units:
           return dates
         end
 
-        local start_date = "2025-01-22"
-        local end_date = "2025-01-25"
+        local start_date = "2026-08-01"
+        local end_date = "2026-08-07"
 
         local dates = generate_date_range(start_date, end_date)
 

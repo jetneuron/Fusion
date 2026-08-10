@@ -2,14 +2,53 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Project Structure
+
+```
+Fusion/
+├── fusion-runtime/              ← 主入口（独立 crate，lib 初始化 + 配置加载 + 插件扫描）
+├── config/                      ← 配置文件
+│   ├── fusion-conf-app.yaml     ← 嵌入 app 模式（singleton）
+│   └── fusion-conf.yaml         ← 服务器模式（cluster）
+├── scripts/
+│   └── build-plugins.sh         ← 构建 capability/unit dylib 并复制到 app/assets/libs/
+├── tests/
+│   └── fusion-unit-tests/       ← 集成测试（YAML 图 + 插件注册 → 执行）
+├── app/                         ← Tauri 桌面应用（独立 workspace）
+│   └── assets/libs/             ← 编译产物：capability/ + unit/ dylib
+└── crates/
+    ├── fusion-streaming/        ← 核心引擎（图解析、物理执行、插件管理、通道、存储）
+    ├── fusion-unit-sdk/         ← SDK（LogicalTask / SourceUnit / MapUnit trait、
+    │                                Row/Column 数据模型、capability 系统、config 系统）
+    ├── fusion-derive/           ← proc macros（SrcLogicTask / MapLogicTask / SinkLogicTask / ScriptEngine）
+    ├── fusion-plugins/          ← 所有插件
+    │   ├── capability/          ← 能力插件（实现 Capability* trait，如 KeyValueStore）
+    │   │   └── fusion-capability-example/
+    │   └── units/               ← 单元插件（提供图节点类型，如 DataFusion、Excel、SSH）
+    │       ├── fusion-unit-datafusion/
+    │       ├── fusion-unit-excel/
+    │       ├── fusion-unit-net/
+    │       ├── fusion-unit-redis/
+    │       ├── fusion-unit-ssh/
+    │       └── fusion-unit-universal-fs/
+    └── scripts/
+        └── fusion-script-ts/    ← TypeScript 脚本引擎（deno_core）
+```
+
 ## Build & Test
 
 ```sh
-# Build everything (default features: common = http + excel)
+# Build everything
 cargo build
 
 # Build with specific features
 cargo build -p fusion-streaming --features "common,trace-physical,trace-logical"
+
+# Build and install plugin dylibs
+bash scripts/build-plugins.sh                 # debug
+bash scripts/build-plugins.sh --release        # release
+bash scripts/build-plugins.sh --only-capabilities  # only capability crates
+bash scripts/build-plugins.sh --only fusion-unit-datafusion  # single crate
 
 # Run all tests
 cargo test
@@ -17,14 +56,14 @@ cargo test
 # Run a single integration test
 cargo test -p fusion-unit-tests --test plugin_base_test -- test_simple_filesystem
 
-# Run with trace logging (exercise caution: trace-logical may produce huge output)
-RUST_LOG=trace cargo test -p fusion-unit-tests -- test_simple_map --nocapture
-
 # Check compilation only (faster than full build)
 cargo check
+
+# Tauri app
+cd app && yarn install && yarn tauri dev
 ```
 
-There is no Makefile, justfile, or custom toolchain config. Edition is Rust 2024 with resolver 3.
+Edition is Rust 2024 with resolver 3.
 
 ## Architecture
 
@@ -32,12 +71,14 @@ Fusion is a graph-based stream computing engine. Users define **logical graphs**
 
 ### Layers
 
-1. **SDK** (`fusion-unit-sdk`) — trait definitions shared by the engine and all unit implementations: `LogicalTask`, `SourceUnit`, `MapUnit`, `InitUnit`, `TaskContext`, `Watermark`, the `Row`/`Column` data model, error types, and script engine interfaces.
-2. **Core engine** (`fusion-streaming`) — graph parsing, physical execution orchestration, plugin management, network channels, storage backends (Redis, ZooKeeper), and script runtimes (Lua via mlua, Tera templates, TypeScript via deno_core).
-3. **Proc macros** (`fusion-derive`) — `#[derive(SrcLogicTask)]`, `#[derive(MapLogicTask)]`, `#[derive(SinkLogicTask)]` generate the `LogicalTask` trait impl (including `internal_launch`, `internal_compute`, and `event` dispatch). `#[derive(ScriptEngine)]` generates the `ScriptEngineFactory` impl.
-4. **Unit plugins** (`fusion-unit-*` crates) — concrete implementations: DataFusion for SQL, Excel read/write, SSH, Redis, universal filesystem sources, network I/O.
-5. **Script engine** (`fusion-script-ts`) — TypeScript/Deno runtime integration for script-based unit logic.
-6. **Integration tests** (`fusion-unit-tests`) — each test loads a YAML graph definition, registers all needed plugins into a `SandboxRuntime`, and executes the graph.
+1. **SDK** (`crates/fusion-unit-sdk`) — trait definitions shared by the engine and all implementations: `LogicalTask`, `SourceUnit`, `MapUnit`, `InitUnit`, `TaskContext`, `Watermark`, the `Row`/`Column` data model, error types, capability system, config system, and script engine interfaces.
+2. **Core engine** (`crates/fusion-streaming`) — graph parsing, physical execution orchestration, plugin management, network channels, storage backends (Redis, ZooKeeper), and script runtimes (Lua via mlua, Tera templates).
+3. **Proc macros** (`crates/fusion-derive`) — `#[derive(SrcLogicTask)]`, `#[derive(MapLogicTask)]`, `#[derive(SinkLogicTask)]` generate the `LogicalTask` trait impl. `#[derive(ScriptEngine)]` generates the `ScriptEngineFactory` impl.
+4. **Runtime** (`fusion-runtime/`) — the main entry point. `FusionRuntimeBuilder` wires together plugin loading, capability loading, config parsing, and graph execution. `FusionRuntime::init_app()` is the one-line startup for embedded mode.
+5. **Plugins** (`crates/fusion-plugins/`) — two categories:
+   - **Capability** (`capability/`): provide trait implementations consumed by unit plugins (e.g. `CapabilityKeyValueStore`). Loaded via `PluginManager::load_capability_plugin()`.
+   - **Unit** (`units/`): provide task types (source/map/sink) referenced in graph YAML. Loaded via `PluginManager::register_plugin()`.
+6. **Tests** (`tests/`) — integration tests load YAML graphs, register plugins, and execute.
 
 ### Key types and flow
 
@@ -45,6 +86,36 @@ Fusion is a graph-based stream computing engine. Users define **logical graphs**
 - `PhysicalGraph::execute()` — converts the petgraph to `PhysicalTask` instances, wires channels between neighbors, handles edge-condition filtering (Lua predicates on edges), launches source nodes via DFS traversal, and awaits all join handles.
 - `TaskCore` — holds the `LocalTaskChannel` (tokio broadcast), the `ComputingUnit` config, and a backpressure `Watermark`.
 - `PluginManager` — maps `"{type}#{version}"` keys to `GraphUnitPlugin` implementations. Built-in units are always registered; external `.dylib`/`.so` plugins can be loaded at runtime.
+
+### Capability system
+
+Capabilities are process-global services that unit plugins consume. They have a defined lifecycle:
+
+```
+register → init → (use) → shutdown
+```
+
+- Trait definitions in `crates/fusion-unit-sdk/src/capability/` (all prefixed `Capability*`)
+- Each trait file has a `well_known` sub-module listing canonical implementation names
+- Global registry via `capability::read()` / `capability::register()`
+- Capability plugins live in `crates/fusion-plugins/capability/`
+
+### Config system
+
+Datasource configurations are centralized in `ConfigRegistry`:
+
+```yaml
+# config/fusion-conf.yaml
+datasources:
+  redis-cache:
+    type: redis
+    host: localhost
+    port: 6379
+```
+
+- `DataSourceConfig` trait + `GenericDataSourceConfig` + `ConfigRegistry` in SDK
+- `FileConfigProvider` (YAML) + `ProgrammaticConfigProvider` (code)
+- Typed access via `config::read_config().get_typed::<RedisDataSourceConfig>("redis-cache")`
 
 ### Node roles
 
@@ -67,7 +138,15 @@ Edge conditions are Lua one-liners compiled into a `function(row) ... end` that 
 
 ### Adding a new unit type
 
-1. Define a struct with `#[derive(Default, SrcLogicTask)]` (or `MapLogicTask`/`SinkLogicTask`).
-2. Implement `InitUnit` (parse config) and `SourceUnit`/`MapUnit` (business logic).
-3. Register it in a `GraphUnitPlugin::register_units()` via `YourTask::register_unit(&mut manifest, version)`.
-4. Add the plugin to the test harness (`TestPlugin::register_units()` in `plugin_base_test.rs`) and write a YAML test graph.
+1. Create `crates/fusion-plugins/units/fusion-unit-<name>/` with `crate-type = ["cdylib", "lib"]`.
+2. Define a struct with `#[derive(Default, SrcLogicTask)]` (or `MapLogicTask`/`SinkLogicTask`).
+3. Implement `InitUnit` (parse config) and `SourceUnit`/`MapUnit` (business logic).
+4. Implement `GraphUnitPlugin` and export `init_plugin` FFI symbol.
+5. Register in the test harness and write a YAML test graph.
+
+### Adding a new capability type
+
+1. Create `crates/fusion-plugins/capability/fusion-capability-<name>/` with `crate-type = ["cdylib", "lib"]`.
+2. Implement a `Capability*` trait from `fusion-unit-sdk::capability`.
+3. Implement `CapabilityPlugin` and export `init_capability_plugin` FFI symbol.
+4. Register via `capability::register(|reg| reg.set_xxx(Arc::new(...)))`.

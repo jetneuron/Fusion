@@ -27,6 +27,11 @@ message Row {
    * raw data
    */
   bytes raw = 5;
+  /**
+   * barrier reference offset — groups data rows from fan-out paths
+   * back to the originating row for barrier-based synchronization.
+   */
+  uint64 barrier_ref = 6;
 }
 
 // Supported data types.
