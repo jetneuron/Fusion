@@ -2,6 +2,7 @@ use crate::execute_with_env;
 use serde_json::json;
 
 mod filesystem_test;
+mod redis_test;
 mod ssh_test;
 
 #[tokio::test]

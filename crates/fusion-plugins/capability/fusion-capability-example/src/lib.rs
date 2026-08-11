@@ -37,7 +37,9 @@
 //! #         target/debug/libfusion_capability_example.so    (Linux)
 //! ```
 
-use fusion_unit_sdk::capability::capability_key_value_store::well_known;
+use fusion_unit_sdk::capability::capability_key_value_store::{
+    well_known, ScanOptions, ScanResult,
+};
 use fusion_unit_sdk::capability::{self, Capability, CapabilityKeyValueStore, CapabilityPlugin};
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use std::collections::HashMap;
@@ -119,28 +121,107 @@ impl CapabilityKeyValueStore for InMemoryKV {
         Ok(())
     }
 
-    async fn scan(&self, prefix: &str) -> UnitResult<Vec<(String, Vec<u8>)>> {
+    async fn mget(&self, keys: &[&str]) -> UnitResult<Vec<Option<Vec<u8>>>> {
         let data = self.data.lock().await;
-        let results: Vec<_> = data
+        Ok(keys.iter().map(|k| data.get(*k).cloned()).collect())
+    }
+
+    async fn scan_page(
+        &self,
+        cursor: Option<&str>,
+        opts: &ScanOptions,
+    ) -> UnitResult<ScanResult> {
+        let data = self.data.lock().await;
+
+        // Resolve cursor: last processed key, or start from beginning.
+        let start_key = cursor.unwrap_or("");
+
+        // Collect matching entries as a sorted vec for stable pagination.
+        let mut matching: Vec<(String, Vec<u8>)> = data
             .iter()
-            .filter(|(k, _)| k.starts_with(prefix))
+            .filter(|(k, _)| {
+                if let Some(pattern) = &opts.pattern {
+                    // Simple glob: * matches any sequence, ? matches one char.
+                    glob_match(k, pattern)
+                } else {
+                    true
+                }
+            })
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        Ok(results)
+        matching.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Find start position from cursor.
+        let start_idx = if start_key.is_empty() {
+            0
+        } else {
+            matching
+                .binary_search_by(|(k, _)| k.as_str().cmp(start_key))
+                .map(|i| i + 1) // skip past the cursor key
+                .unwrap_or_else(|i| i)
+        };
+
+        let page_size = opts.page_size.unwrap_or(100) as usize;
+        let end = (start_idx + page_size).min(matching.len());
+        let entries: Vec<_> = matching[start_idx..end].to_vec();
+
+        let next_cursor = if end < matching.len() {
+            Some(matching[end - 1].0.clone())
+        } else {
+            None
+        };
+
+        Ok(ScanResult {
+            entries,
+            next_cursor,
+        })
     }
+}
+
+/// Minimal glob matching for `*` (any sequence) and `?` (single char).
+fn glob_match(s: &str, pattern: &str) -> bool {
+    let s: Vec<char> = s.chars().collect();
+    let p: Vec<char> = pattern.chars().collect();
+    let mut dp = vec![vec![false; p.len() + 1]; s.len() + 1];
+    dp[0][0] = true;
+    for j in 0..p.len() {
+        if p[j] == '*' {
+            dp[0][j + 1] = dp[0][j];
+        } else {
+            break;
+        }
+    }
+    for i in 0..s.len() {
+        for j in 0..p.len() {
+            if p[j] == '*' {
+                dp[i + 1][j + 1] = dp[i][j + 1] || dp[i + 1][j];
+            } else if p[j] == '?' || s[i] == p[j] {
+                dp[i + 1][j + 1] = dp[i][j];
+            }
+        }
+    }
+    dp[s.len()][p.len()]
 }
 
 // ============================================================
 // CapabilityPlugin — the dylib-facing interface
 // ============================================================
 
-/// Plugin entry point that registers the example capabilities.
+/// Plugin entry point that registers both a pre-built instance (for
+/// backward compat) and a factory (for config-driven creation).
 pub struct ExampleCapabilityPlugin;
 
 impl CapabilityPlugin for ExampleCapabilityPlugin {
     fn register(&self) {
         capability::register(|reg| {
+            // Pre-built instance (backward compat).
             reg.set_kv(Arc::new(InMemoryKV::new()));
+
+            // Factory: creates an InMemoryKV from config entries with
+            // config_type "inmemory".
+            reg.set_kv_factory("inmemory", |_entry| {
+                Ok(Arc::new(InMemoryKV::new()))
+            });
         });
     }
 
@@ -186,14 +267,15 @@ mod tests {
         // ── Step 2: look up by well_known constant ──
         let kv = capability::read()
             .kv(well_known::IN_MEMORY)
-            .cloned()
             .expect("inmemory kv store should be registered");
 
         // ── Step 3: use the capability ──
         kv.set("key1", b"value1").await.unwrap();
         assert_eq!(kv.get("key1").await.unwrap(), Some(b"value1".to_vec()));
 
-        kv.scan("key").await.unwrap();
+        kv.scan_all(&ScanOptions::new().pattern("key*"))
+            .await
+            .unwrap();
 
         kv.delete("key1").await.unwrap();
         assert_eq!(kv.get("key1").await.unwrap(), None);
@@ -224,7 +306,6 @@ mod tests {
         {
             let kv = capability::read()
                 .kv(well_known::IN_MEMORY)
-                .cloned()
                 .unwrap();
             kv.set("key", b"val").await.unwrap();
             assert_eq!(kv.get("key").await.unwrap(), Some(b"val".to_vec()));
@@ -255,5 +336,50 @@ mod tests {
         // List all registered KV store names
         let names: Vec<_> = capability::read().kv_names().cloned().collect();
         assert!(names.contains(&well_known::IN_MEMORY.to_string()));
+    }
+
+    /// Full three-layer flow: config entry → factory → instance.
+    ///
+    /// 1. Register a config entry under the three-level hierarchy
+    ///    (datasource → inmemory → test-kv).
+    /// 2. Register a factory for config_type "inmemory".
+    /// 3. `capability::kv("test-kv")` → get instance → use.
+    #[tokio::test]
+    async fn test_three_layer_config_to_capability() {
+        // ── Layer 1: config entry ──
+        fusion_unit_sdk::config::register(|reg| {
+            reg.insert(
+                "datasource",
+                "inmemory",
+                "test-kv",
+                serde_json::json!({}), // InMemoryKV ignores config data
+            );
+        });
+
+        // ── Layer 2: factory ──
+        capability::register(|reg| {
+            reg.set_kv_factory("inmemory", |_entry| {
+                Ok(Arc::new(InMemoryKV::new()))
+            });
+        });
+
+        // ── Layer 3: get instance by config ID ──
+        let kv = capability::kv("test-kv")
+            .expect("instance should be created from config + factory");
+
+        // ── Use ──
+        kv.set("k", b"v").await.unwrap();
+        assert_eq!(kv.get("k").await.unwrap(), Some(b"v".to_vec()));
+        assert!(kv.exists("k").await.unwrap());
+
+        // Paginated scan
+        kv.set("test:a", b"1").await.unwrap();
+        kv.set("test:b", b"2").await.unwrap();
+        let opts = ScanOptions::new().pattern("test:*").page_size(10);
+        let page = kv.scan_page(None, &opts).await.unwrap();
+        assert_eq!(page.entries.len(), 2);
+
+        kv.mdelete(&["k", "test:a", "test:b"]).await.unwrap();
+        assert!(!kv.exists("k").await.unwrap());
     }
 }

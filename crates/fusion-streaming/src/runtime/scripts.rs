@@ -9,7 +9,7 @@ use fusion_unit_sdk::runtime::state::{GraphStates, State};
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use linkme::distributed_slice;
 use log::{debug, warn};
-use mlua::{Function, Lua};
+use mlua::{AnyUserData, Function, Lua};
 use std::pin::Pin;
 use std::sync::Arc;
 use tera::Tera;
@@ -62,13 +62,14 @@ impl Scripter for LuaScript {
         states: GraphStates,
         ctx: &TaskContext,
         row: Row,
+        this_key: Option<mlua::RegistryKey>,
     ) -> Pin<Box<dyn Future<Output = UnitResult<()>> + Send>>
     where
         'life0: 'async_trait,
         Self: 'async_trait,
     {
         let inner_states = self.states.clone();
-        let func_name = format!("lua_script_{}", task_id);
+        let func_name = format!("lua_script_{}", task_id.replace('-', "_"));
         let scripts = self.inner.lines().collect::<Vec<&str>>().join("\n  ");
         let ctx = LuaContext::wrap(ctx.clone());
         let arc_row = Arc::new(Mutex::new(row));
@@ -76,6 +77,16 @@ impl Scripter for LuaScript {
             let lua_ref = inner_states.state::<GraphLua>()?;
             let lua_mutex = lua_ref.0.lock().await;
             let globals = lua_mutex.globals();
+
+            // Retrieve `this` userdata from registry if a key was provided.
+            let this_val: Option<AnyUserData> = match this_key {
+                Some(ref key) => Some(lua_mutex.registry_value(key).map_err(|e| {
+                    UnitError::unknown(format!("Failed to retrieve registry value: {e}"))
+                })?),
+                None => None,
+            };
+
+            let has_this = this_val.is_some();
             let func = match globals.get::<Function>(func_name.clone()) {
                 Ok(func) => func,
                 Err(err) => {
@@ -83,13 +94,23 @@ impl Scripter for LuaScript {
                         "Lua func: {func_name} not exist, create new chunk. reason: {}",
                         err.to_string()
                     );
-                    let chunk = format!(
-                        r#"
-function {func_name}(ctx, data)
-  {scripts}
-  return true
-end"#
-                    );
+                    let chunk = if has_this {
+                        format!(
+                            r#"
+	function {func_name}(ctx, data, this)
+	  {scripts}
+	  return true
+	end"#
+                        )
+                    } else {
+                        format!(
+                            r#"
+	function {func_name}(ctx, data)
+	  {scripts}
+	  return true
+	end"#
+                        )
+                    };
 
                     log::debug!("lua code: {}", &chunk);
                     lua_mutex.load(chunk).exec().map_err(|err| {
@@ -100,7 +121,12 @@ end"#
             };
 
             let lua_row = LuaRow::wrap(arc_row).await;
-            match func.call_async::<bool>((ctx, lua_row)).await {
+            let result = if let Some(inner_this) = this_val {
+                func.call_async::<bool>((ctx, lua_row, inner_this)).await
+            } else {
+                func.call_async::<bool>((ctx, lua_row)).await
+            };
+            match result {
                 Ok(_) => {}
                 Err(err) => {
                     println!("{}", err);
@@ -111,14 +137,10 @@ end"#
     }
 }
 
-pub(crate) struct GraphLua(pub(crate) Arc<Mutex<Lua>>);
+pub struct GraphLua(pub Arc<Mutex<Lua>>);
 
 impl State for GraphLua {}
 
 pub(crate) struct GraphTera(pub(crate) Arc<Mutex<Tera>>);
 
 impl State for GraphTera {}
-
-//pub(crate) struct GraphJavascript(pub(crate) Arc<Mutex<JsRuntime>>);
-
-//impl State for GraphJavascript {}

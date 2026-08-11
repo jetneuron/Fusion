@@ -1,21 +1,37 @@
-//! DataSource configuration system.
+//! Unified configuration system.
+//!
+//! All configuration is stored in a flat, globally-unique instance-ID-keyed
+//! registry. The three-level hierarchy (category → type → instance) is for
+//! organization in YAML files and discovery — not for lookup.
 //!
 //! ## Architecture
 //!
 //! ```text
-//! fusion-config.yaml ──→ FileConfigProvider ──→ ConfigRegistry ──→ CapabilityManager
-//! (or programmatic)        (parses YAML)          (global store)     (creates instances)
+//! fusion-conf.yaml
+//!   config:
+//!     datasource:           ← category
+//!       redis:              ← config_type
+//!         redis-cache:      ← instance id  }
+//!           host: ...       ← data         }  ConfigRegistry entry
+//!         redis-session:                   }
+//!           host: ...
+//!     setting:
+//!       pool:
+//!         default:
+//!           max_size: 16
 //! ```
 //!
-//! ## Adding a new datasource config type
+//! Capabilities look up config by instance ID alone:
 //!
-//! 1. Create a struct implementing [`DataSourceConfig`].
-//! 2. Register it with `config_type_registry` so [`FileConfigProvider`] can
-//!    deserialize it by `type` field.
+//! ```ignore
+//! let redis: RedisDataSourceConfig = config::get("redis-cache")?;
+//! ```
 //!
-//! ## Example (Redis)
+//! ## Adding configuration
 //!
-//! See [`crate::capability::capability_key_value_store_config`].
+//! 1. Define a `Deserialize` struct for your config shape.
+//! 2. Add it to a YAML file under the three-level hierarchy.
+//! 3. Call `config::get::<YourType>("your-id")` to retrieve it.
 
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -24,162 +40,149 @@ use std::sync::{Arc, OnceLock};
 pub mod providers;
 
 // ============================================================
-// DataSourceConfig trait
+// ConfigEntry
 // ============================================================
 
-/// Common interface for all datasource configurations.
+/// A single configuration entry.
 ///
-/// Each datasource type (redis, postgres, mongodb, …) has a concrete
-/// struct implementing this trait. The trait itself is object-safe so
-/// configurations can be stored as `Arc<dyn DataSourceConfig>` in the
-/// [`ConfigRegistry`].
-pub trait DataSourceConfig: Send + Sync + 'static {
-    /// Unique identifier for this datasource, e.g. `"redis-cache"`.
-    fn id(&self) -> &str;
-
-    /// Datasource type, e.g. `"redis"`, `"postgres"`, `"mongodb"`.
-    /// Used by [`FileConfigProvider`] to determine the concrete struct
-    /// during deserialization.
-    fn source_type(&self) -> &str;
-
-    /// The full configuration as a JSON value.
-    ///
-    /// Used by [`ConfigRegistry::get_typed`] to deserialize into a
-    /// typed config struct on demand.
-    fn raw_config(&self) -> &serde_json::Value;
-
-    /// Validate required fields and value ranges.
-    ///
-    /// Returns a list of validation errors, or `Ok(())` if valid.
-    fn validate(&self) -> Result<(), Vec<String>>;
-
-    /// Enable downcasting to concrete types via [`std::any::Any`].
-    fn as_any(&self) -> &dyn std::any::Any;
+/// Stored in [`ConfigRegistry`] keyed by a globally-unique instance ID.
+/// The `category` and `config_type` fields are metadata for discovery
+/// and YAML organization — lookups use only the instance ID.
+#[derive(Debug, Clone)]
+pub struct ConfigEntry {
+    /// Top-level category: `"datasource"`, `"setting"`, `"metadata"`.
+    pub category: String,
+    /// Type within the category: `"redis"`, `"postgres"`, `"pool"`.
+    pub config_type: String,
+    /// The configuration payload as a JSON value.
+    pub data: serde_json::Value,
 }
 
 // ============================================================
-// GenericDataSourceConfig — catch-all for unknown types
+// ConfigRegistry
 // ============================================================
 
-/// A generic datasource config that stores the raw JSON payload.
+/// Holds all configuration entries keyed by globally-unique instance ID.
 ///
-/// This is the default storage format in [`ConfigRegistry`].
-/// Typed access is provided by [`ConfigRegistry::get_typed`],
-/// which deserializes the raw JSON into a concrete struct on demand.
-pub struct GenericDataSourceConfig {
-    id: String,
-    source_type: String,
-    raw: serde_json::Value,
-}
-
-impl GenericDataSourceConfig {
-    pub fn new(id: impl Into<String>, source_type: impl Into<String>, raw: serde_json::Value) -> Self {
-        Self {
-            id: id.into(),
-            source_type: source_type.into(),
-            raw,
-        }
-    }
-}
-
-impl DataSourceConfig for GenericDataSourceConfig {
-    fn id(&self) -> &str {
-        &self.id
-    }
-
-    fn source_type(&self) -> &str {
-        &self.source_type
-    }
-
-    fn raw_config(&self) -> &serde_json::Value {
-        &self.raw
-    }
-
-    fn validate(&self) -> Result<(), Vec<String>> {
-        Ok(()) // Generic: no schema to validate against.
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
-// ============================================================
-// ConfigRegistry — global singleton
-// ============================================================
-
-/// Holds all registered datasource configurations.
+/// # Lookup
+///
+/// ```ignore
+/// let redis: RedisDataSourceConfig = config::get("redis-cache")?;
+/// let pool: u32 = config::get::<u32>("redis.pool.size").unwrap_or(16);
+/// ```
+///
+/// # Registration
+///
+/// ```ignore
+/// config::register(|reg| {
+///     reg.insert("datasource", "redis", "redis-cache",
+///         json!({"host": "localhost", "port": 6379}));
+/// });
+/// ```
 pub struct ConfigRegistry {
-    /// Keyed by datasource id.
-    datasources: HashMap<String, Arc<dyn DataSourceConfig>>,
+    entries: HashMap<String, ConfigEntry>,
 }
 
 impl ConfigRegistry {
     pub fn new() -> Self {
         Self {
-            datasources: HashMap::new(),
+            entries: HashMap::new(),
         }
     }
 
-    /// Register a datasource configuration.
+    /// Insert a configuration entry.
     ///
-    /// Replaces any existing config with the same id.
-    pub fn register(&mut self, config: Arc<dyn DataSourceConfig>) {
-        let id = config.id().to_string();
-        self.datasources.insert(id, config);
+    /// # Parameters
+    /// - `category`: top-level group, e.g. `"datasource"`, `"setting"`, `"metadata"`.
+    /// - `config_type`: type within the category, e.g. `"redis"`, `"postgres"`, `"pool"`.
+    /// - `id`: globally-unique instance identifier, e.g. `"redis-cache"`.
+    /// - `data`: the configuration payload as JSON.
+    pub fn insert(
+        &mut self,
+        category: impl Into<String>,
+        config_type: impl Into<String>,
+        id: impl Into<String>,
+        data: serde_json::Value,
+    ) {
+        self.entries.insert(
+            id.into(),
+            ConfigEntry {
+                category: category.into(),
+                config_type: config_type.into(),
+                data,
+            },
+        );
     }
 
-    /// Look up a datasource by id.
-    pub fn get(&self, id: &str) -> Option<&Arc<dyn DataSourceConfig>> {
-        self.datasources.get(id)
-    }
-
-    /// Remove a datasource by id.
-    pub fn remove(&mut self, id: &str) -> Option<Arc<dyn DataSourceConfig>> {
-        self.datasources.remove(id)
-    }
-
-    /// Iterate all registered datasource ids.
-    pub fn ids(&self) -> impl Iterator<Item = &String> {
-        self.datasources.keys()
-    }
-
-    /// List datasource ids filtered by source type.
-    pub fn ids_by_type(&self, source_type: &str) -> Vec<&String> {
-        self.datasources
-            .iter()
-            .filter(|(_, ds)| ds.source_type() == source_type)
-            .map(|(id, _)| id)
-            .collect()
-    }
-
-    /// Deserialize a datasource into a typed config struct.
+    /// Look up an entry by instance ID and deserialize it to `T`.
     ///
-    /// Returns `None` if the datasource does not exist or deserialization
-    /// fails. The target type must implement [`serde::de::DeserializeOwned`]
-    /// and match the structure of the stored JSON.
+    /// Returns `None` if the ID is not found or deserialization fails.
     ///
     /// # Example
     ///
     /// ```ignore
-    /// let redis: RedisDataSourceConfig = registry.get_typed("redis-cache").unwrap();
-    /// println!("host={}, port={}", redis.host, redis.port);
+    /// #[derive(Deserialize)]
+    /// struct RedisConfig { host: String, port: u16 }
+    ///
+    /// let redis: RedisConfig = config::get("redis-cache").unwrap();
     /// ```
-    pub fn get_typed<T>(&self, id: &str) -> Option<T>
-    where
-        T: DataSourceConfig + serde::de::DeserializeOwned,
-    {
-        let ds = self.datasources.get(id)?;
-        serde_json::from_value(ds.raw_config().clone()).ok()
+    pub fn get<T: serde::de::DeserializeOwned>(&self, id: &str) -> Option<T> {
+        let entry = self.entries.get(id)?;
+        serde_json::from_value(entry.data.clone()).ok()
     }
 
-    /// Number of registered datasources.
+    /// Look up the raw JSON value for an entry.
+    pub fn get_raw(&self, id: &str) -> Option<&serde_json::Value> {
+        self.entries.get(id).map(|e| &e.data)
+    }
+
+    /// Look up the full [`ConfigEntry`] metadata.
+    pub fn entry(&self, id: &str) -> Option<&ConfigEntry> {
+        self.entries.get(id)
+    }
+
+    /// Remove an entry by instance ID.
+    pub fn remove(&mut self, id: &str) -> Option<ConfigEntry> {
+        self.entries.remove(id)
+    }
+
+    /// Iterate all instance IDs.
+    pub fn ids(&self) -> impl Iterator<Item = &String> {
+        self.entries.keys()
+    }
+
+    /// Count of registered entries.
     pub fn len(&self) -> usize {
-        self.datasources.len()
+        self.entries.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.datasources.is_empty()
+        self.entries.is_empty()
+    }
+
+    /// List instance IDs filtered by category and config type.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let redis_ids = config::read().ids_by("datasource", "redis");
+    /// // → ["redis-cache", "redis-session"]
+    /// ```
+    pub fn ids_by(&self, category: &str, config_type: &str) -> Vec<&String> {
+        self.entries
+            .iter()
+            .filter(|(_, e)| e.category == category && e.config_type == config_type)
+            .map(|(id, _)| id)
+            .collect()
+    }
+
+    /// List instance IDs within a category (any type).
+    pub fn ids_in_category(&self, category: &str) -> Vec<&String> {
+        self.entries
+            .iter()
+            .filter(|(_, e)| e.category == category)
+            .map(|(id, _)| id)
+            .collect()
     }
 }
 
@@ -197,31 +200,43 @@ fn registry() -> &'static RwLock<ConfigRegistry> {
     CONFIG_REGISTRY.get_or_init(|| RwLock::new(ConfigRegistry::new()))
 }
 
-/// Register datasource configs into the global registry.
+/// Register configuration entries into the global registry.
 ///
-/// Used by [`ConfigProvider`](providers::ConfigProvider) implementations
+/// Called by [`ConfigProvider`](providers::ConfigProvider) implementations
 /// and for programmatic registration.
 ///
 /// # Example
 ///
 /// ```ignore
 /// config::register(|reg| {
-///     reg.register(Arc::new(GenericDataSourceConfig::new(
-///         "redis-cache", "redis",
-///         serde_json::json!({"host": "localhost", "port": 6379}),
-///     )));
+///     reg.insert("datasource", "redis", "redis-cache",
+///         serde_json::json!({"host": "localhost", "port": 6379}));
 /// });
 /// ```
 pub fn register(f: impl FnOnce(&mut ConfigRegistry)) {
     f(&mut registry().write());
 }
 
+/// Typed lookup: retrieve a config entry by instance ID and deserialize to `T`.
+///
+/// # Example
+///
+/// ```ignore
+/// #[derive(Deserialize)]
+/// struct RedisConfig { host: String, port: u16 }
+///
+/// let redis: RedisConfig = config::get("redis-cache").unwrap();
+/// ```
+pub fn get<T: serde::de::DeserializeOwned>(id: &str) -> Option<T> {
+    registry().read().get(id)
+}
+
 /// Acquire a read lock on the global config registry.
-pub fn read_config() -> parking_lot::RwLockReadGuard<'static, ConfigRegistry> {
+pub fn read() -> parking_lot::RwLockReadGuard<'static, ConfigRegistry> {
     registry().read()
 }
 
 /// Acquire a write lock on the global config registry.
-pub fn write_config() -> parking_lot::RwLockWriteGuard<'static, ConfigRegistry> {
+pub fn write() -> parking_lot::RwLockWriteGuard<'static, ConfigRegistry> {
     registry().write()
 }

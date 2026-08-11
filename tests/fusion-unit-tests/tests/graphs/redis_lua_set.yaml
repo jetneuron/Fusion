@@ -1,0 +1,38 @@
+name: redis_lua_set_test
+
+units:
+  - id: input
+    name: input_node
+    type: DebugInputUnitTask
+    version: builtin
+    config:
+      times: 3
+      column_count: 2
+      interval: 0
+
+  - id: kv-writer
+    name: kv_writer_node
+    type: RedisUnitTask
+    version: unstable
+    config:
+      datasource: test-redis
+      $script_type: lua
+      $script: |
+        this:set(data['c0'], data['c1'])
+        this:expire(data['c0'], 120000)
+        ctx:send(data)
+
+  - id: output
+    name: output_node
+    type: DebugOutputUnitTask
+    version: builtin
+    config:
+      show_report: true
+
+edges:
+  - id: e1
+    source: input
+    target: kv-writer
+  - id: e2
+    source: kv-writer
+    target: output

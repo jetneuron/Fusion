@@ -45,12 +45,16 @@ pub trait Scripter: 'static {
         'life0: 'async_trait,
         Self: 'async_trait;
 
+    /// `this_key` — optional Lua registry key for a `this` userdata
+    /// (e.g. KV store, SQL engine). When `Some`, the script
+    /// function receives it as the third argument.
     fn row_eval<'life0, 'async_trait>(
         &self,
         task_id: &UnitIdx,
         states: GraphStates,
         ctx: &TaskContext,
         row: Row,
+        this_key: Option<mlua::RegistryKey>,
     ) -> Pin<Box<dyn Future<Output = UnitResult<()>> + Send>>
     where
         'life0: 'async_trait,

@@ -16,6 +16,7 @@ use fusion_unit_datafusion::datafusion_unit::DataFusionUnit;
 use fusion_unit_excel::SpreadSheetUnitTask;
 use fusion_unit_ssh::SSHUnitTask;
 use fusion_unit_universal_fs::UniversalFsUnitTask;
+use fusion_unit_redis::RedisUnitTask;
 use libloading::{Library, Symbol};
 use serde_json::{json, Value};
 use std::ops::Deref;
@@ -42,6 +43,9 @@ impl GraphUnitPlugin for TestPlugin {
 
         // Universal FS
         UniversalFsUnitTask::register_unit(&mut manifest, self.plugin_version());
+
+        // Redis (script-driven KV)
+        RedisUnitTask::register_unit(&mut manifest, self.plugin_version());
         manifest
     }
 }

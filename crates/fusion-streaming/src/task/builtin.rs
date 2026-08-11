@@ -197,7 +197,7 @@ impl MapUnit for MapUnitTask {
             let scripter = scripter.lock().await;
             let states = ctx.states.clone();
             let id = self.meta.get_id();
-            scripter.row_eval(&id, states, ctx, row).await?;
+            scripter.row_eval(&id, states, ctx, row, None).await?;
             Ok(())
         }))
     }

@@ -16,18 +16,30 @@
 //! Each trait file also contains a [`well_known`] sub-module listing
 //! canonical implementation names.
 //!
-//! ## Lifecycle
+//! ## Architecture: factories + instances
 //!
-//! Every capability goes through a defined lifecycle:
+//! Capabilities are created in two layers:
+//!
+//! 1. **Factory** — registered by capability plugins, bound to a `config_type`
+//!    (e.g. `"redis"`). A factory knows how to create an instance from a
+//!    [`ConfigEntry`](crate::config::ConfigEntry).
+//! 2. **Instance** — created lazily when first requested by instance ID
+//!    (e.g. `"redis-cache"`). The instance ID matches a config entry whose
+//!    `config_type` triggers the corresponding factory.
 //!
 //! ```text
-//! register → init → (use) → shutdown
+//! capability::kv("redis-cache")
+//!   → read config entry "redis-cache" → config_type = "redis"
+//!   → find factory for "redis"
+//!   → factory(&entry) → Arc<dyn CapabilityKeyValueStore>
+//!   → cache under "redis-cache"
 //! ```
 //!
-//! - **register** — stored in [`CapabilityRegistry`] via `set_xxx()`.
-//! - **init** — [`Capability::init()`] is called to establish connections,
-//!   allocate resources, etc.
-//! - **shutdown** — [`Capability::shutdown()`] releases resources before removal.
+//! ## Lifecycle
+//!
+//! ```text
+//! register factory → create instance (lazy) → init → (use) → shutdown
+//! ```
 //!
 //! ## Adding a new capability
 //!
@@ -56,6 +68,40 @@ pub use capability_sql_engine::CapabilitySqlEngine;
 pub use capability_document_database::CapabilityDocumentDatabase;
 pub use capability_key_value_store::CapabilityKeyValueStore;
 pub use capability_spreadsheet_engine::CapabilitySpreadsheetEngine;
+
+// ---- Factory types ------------------------------------------
+
+/// A factory that creates a [`CapabilityKeyValueStore`] instance from a
+/// config entry.
+pub type KvFactory = Box<
+    dyn Fn(&crate::config::ConfigEntry) -> crate::runtime::UnitResult<Arc<dyn CapabilityKeyValueStore>>
+        + Send
+        + Sync,
+>;
+
+/// A factory that creates a [`CapabilitySqlEngine`] instance from a
+/// config entry.
+pub type SqlFactory = Box<
+    dyn Fn(&crate::config::ConfigEntry) -> crate::runtime::UnitResult<Arc<dyn CapabilitySqlEngine>>
+        + Send
+        + Sync,
+>;
+
+/// A factory that creates a [`CapabilityDocumentDatabase`] instance from a
+/// config entry.
+pub type DocFactory = Box<
+    dyn Fn(&crate::config::ConfigEntry) -> crate::runtime::UnitResult<Arc<dyn CapabilityDocumentDatabase>>
+        + Send
+        + Sync,
+>;
+
+/// A factory that creates a [`CapabilitySpreadsheetEngine`] instance from a
+/// config entry.
+pub type SpreadsheetFactory = Box<
+    dyn Fn(&crate::config::ConfigEntry) -> crate::runtime::UnitResult<Arc<dyn CapabilitySpreadsheetEngine>>
+        + Send
+        + Sync,
+>;
 
 // ============================================================
 // Base capability trait
@@ -136,50 +182,43 @@ pub trait Capability: Send + Sync + 'static {
 // Global capability registry
 // ============================================================
 
-/// Holds all registered capability implementations.
+/// Holds capability factories and instances.
 ///
-/// Each slot is a name → implementation map. Unit plugins look up
-/// capabilities by name via the per-trait getter methods.
+/// Capabilities are obtained by **instance ID** (e.g. `"redis-cache"`),
+/// which matches a config entry's ID. The config entry's `config_type`
+/// (e.g. `"redis"`) selects the factory that creates the instance.
 ///
-/// # Lifecycle methods
+/// # Two registration modes
 ///
-/// Beyond `set_xxx()` (register) and `xxx()` (lookup), each slot provides:
+/// | Method | Use case |
+/// |--------|----------|
+/// | `set_kv(instance)` | Pre-built instance (e.g. in-memory, testing) |
+/// | `set_kv_factory(type, fn)` | Factory that creates instances from config |
 ///
-/// | Method | Purpose |
-/// |--------|---------|
-/// | `init_xxx(name)` | Call [`Capability::init()`] on one implementation |
-/// | `init_all_xxx()` | Call [`Capability::init()`] on all registered |
-/// | `shutdown_xxx(name)` | Call [`Capability::shutdown()`] and remove |
-/// | `shutdown_all_xxx()` | Shutdown and remove all |
+/// # Lookup
 ///
-/// # Example
-///
-/// ```ignore
-/// // Registration
-/// capability::register(|reg| {
-///     reg.set_kv(Arc::new(RedisKV::new(...)));
-///     reg.set_kv(Arc::new(HBaseKV::new(...)));
-/// });
-///
-/// // Initialize all KV stores (connect to backends)
-/// capability::write().init_all_kv().await?;
-///
-/// // Use
-/// let redis = capability::read().kv("redis").unwrap();
-/// redis.set("key", b"value").await?;
-///
-/// // Shutdown one
-/// capability::write().shutdown_kv("hbase").await?;
-/// ```
+/// - `registry.kv(id)` — returns pre-built or cached instance
+/// - `capability::kv(id)` — global convenience, does get-or-create via factory
 pub struct CapabilityRegistry {
-    /// SQL query engines by name (e.g., `"datafusion"`, `"duckdb"`).
-    sql_engines: HashMap<String, Arc<dyn CapabilitySqlEngine>>,
-    /// Document databases by name (e.g., `"mongodb"`, `"couchdb"`).
-    document_dbs: HashMap<String, Arc<dyn CapabilityDocumentDatabase>>,
-    /// Key-value stores by name (e.g., `"redis"`, `"hbase"`, `"inmemory"`).
+    // ---- Pre-built instances (set_xxx) ----
     kv_stores: HashMap<String, Arc<dyn CapabilityKeyValueStore>>,
-    /// Spreadsheet engines by name (e.g., `"excel"`).
+    sql_engines: HashMap<String, Arc<dyn CapabilitySqlEngine>>,
+    document_dbs: HashMap<String, Arc<dyn CapabilityDocumentDatabase>>,
     spreadsheets: HashMap<String, Arc<dyn CapabilitySpreadsheetEngine>>,
+
+    // ---- Factories (set_xxx_factory) ----
+    kv_factories: HashMap<String, KvFactory>,
+    sql_factories: HashMap<String, SqlFactory>,
+    doc_factories: HashMap<String, DocFactory>,
+    spreadsheet_factories: HashMap<String, SpreadsheetFactory>,
+
+    // ---- Lazy instance cache ----
+    kv_instances: parking_lot::RwLock<HashMap<String, Arc<dyn CapabilityKeyValueStore>>>,
+    sql_instances: parking_lot::RwLock<HashMap<String, Arc<dyn CapabilitySqlEngine>>>,
+    doc_instances: parking_lot::RwLock<HashMap<String, Arc<dyn CapabilityDocumentDatabase>>>,
+    spreadsheet_instances:
+        parking_lot::RwLock<HashMap<String, Arc<dyn CapabilitySpreadsheetEngine>>>,
+
     /// Escape hatch for capabilities not yet defined as typed slots.
     pub extensions: HashMap<&'static str, Arc<dyn std::any::Any + Send + Sync>>,
 }
@@ -187,10 +226,18 @@ pub struct CapabilityRegistry {
 impl CapabilityRegistry {
     pub fn new() -> Self {
         Self {
+            kv_stores: HashMap::new(),
             sql_engines: HashMap::new(),
             document_dbs: HashMap::new(),
-            kv_stores: HashMap::new(),
             spreadsheets: HashMap::new(),
+            kv_factories: HashMap::new(),
+            sql_factories: HashMap::new(),
+            doc_factories: HashMap::new(),
+            spreadsheet_factories: HashMap::new(),
+            kv_instances: parking_lot::RwLock::new(HashMap::new()),
+            sql_instances: parking_lot::RwLock::new(HashMap::new()),
+            doc_instances: parking_lot::RwLock::new(HashMap::new()),
+            spreadsheet_instances: parking_lot::RwLock::new(HashMap::new()),
             extensions: HashMap::new(),
         }
     }
@@ -199,33 +246,83 @@ impl CapabilityRegistry {
     // CapabilityKeyValueStore
     // ================================================================
 
-    /// Register a [`CapabilityKeyValueStore`] under its [`Capability::name()`].
+    /// Register a pre-built [`CapabilityKeyValueStore`] instance.
     ///
-    /// Does **not** call [`Capability::init()`] — use [`init_kv()`](Self::init_kv)
-    /// or [`init_all_kv()`](Self::init_all_kv) after registration.
+    /// For config-driven instantiation, use [`set_kv_factory`](Self::set_kv_factory)
+    /// and look up by config instance ID via [`kv`](Self::kv).
     pub fn set_kv(&mut self, kv: Arc<dyn CapabilityKeyValueStore>) {
         let name = kv.name().to_string();
         self.kv_stores.insert(name, kv);
     }
 
-    /// Look up a [`CapabilityKeyValueStore`] by name.
-    pub fn kv(&self, name: &str) -> Option<&Arc<dyn CapabilityKeyValueStore>> {
-        self.kv_stores.get(name)
+    /// Register a factory that creates [`CapabilityKeyValueStore`] instances
+    /// from config entries whose `config_type` matches this factory's key.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// reg.set_kv_factory("redis", |entry| {
+    ///     let cfg: RedisConfig = serde_json::from_value(entry.data.clone())?;
+    ///     Ok(Arc::new(RedisCapability::new(&cfg.connection_url())?))
+    /// });
+    /// ```
+    pub fn set_kv_factory(
+        &mut self,
+        config_type: impl Into<String>,
+        factory: impl Fn(&crate::config::ConfigEntry) -> crate::runtime::UnitResult<Arc<dyn CapabilityKeyValueStore>>
+            + Send
+            + Sync
+            + 'static,
+    ) {
+        self.kv_factories
+            .insert(config_type.into(), Box::new(factory));
+    }
+
+    /// Get-or-create a [`CapabilityKeyValueStore`] by instance ID.
+    ///
+    /// 1. Checks pre-built stores (fast path).
+    /// 2. Checks the lazy instance cache.
+    /// 3. Reads the config entry for this ID, finds the matching factory
+    ///    by `config_type`, creates the instance, and caches it.
+    pub fn kv(&self, id: &str) -> Option<Arc<dyn CapabilityKeyValueStore>> {
+        // Fast path: pre-built stores
+        if let Some(inst) = self.kv_stores.get(id) {
+            return Some(inst.clone());
+        }
+        // Lazy cache hit
+        if let Some(inst) = self.kv_instances.read().get(id) {
+            return Some(inst.clone());
+        }
+        // Lazy create via factory
+        let config_guard = crate::config::read();
+        let entry = config_guard.entry(id)?;
+        let factory = self.kv_factories.get(&entry.config_type)?;
+        let instance = factory(entry).ok()?;
+        drop(config_guard);
+        self.kv_instances
+            .write()
+            .insert(id.to_string(), instance.clone());
+        Some(instance)
     }
 
     /// Look up the KV store registered as `"default"`.
-    pub fn default_kv(&self) -> Option<&Arc<dyn CapabilityKeyValueStore>> {
+    pub fn default_kv(&self) -> Option<Arc<dyn CapabilityKeyValueStore>> {
         self.kv("default")
     }
 
-    /// Iterate all registered KV store names.
+    /// Iterate all pre-built KV store names.
     pub fn kv_names(&self) -> impl Iterator<Item = &String> {
         self.kv_stores.keys()
     }
 
-    /// Call [`Capability::init()`] on the named KV store.
+    /// Iterate all KV factory names (config types).
+    pub fn kv_factory_names(&self) -> impl Iterator<Item = &String> {
+        self.kv_factories.keys()
+    }
+
+    /// Call [`Capability::init()`] on a pre-built or cached KV instance.
     pub async fn init_kv(&self, name: &str) -> UnitResult<()> {
-        match self.kv_stores.get(name) {
+        match self.kv(name) {
             Some(kv) => kv.init().await,
             None => Err(crate::runtime::UnitError::unknown(format!(
                 "kv store `{name}` not registered"
@@ -233,9 +330,15 @@ impl CapabilityRegistry {
         }
     }
 
-    /// Call [`Capability::init()`] on all registered KV stores.
+    /// Call [`Capability::init()`] on all pre-built + cached KV instances.
     pub async fn init_all_kv(&self) -> UnitResult<()> {
-        for name in self.kv_stores.keys().cloned().collect::<Vec<_>>() {
+        let names: Vec<String> = self
+            .kv_stores
+            .keys()
+            .chain(self.kv_instances.read().keys())
+            .cloned()
+            .collect();
+        for name in names {
             self.init_kv(&name).await?;
         }
         Ok(())
@@ -243,17 +346,25 @@ impl CapabilityRegistry {
 
     /// Call [`Capability::shutdown()`] on the named KV store and remove it.
     pub async fn shutdown_kv(&mut self, name: &str) -> UnitResult<()> {
-        match self.kv_stores.remove(name) {
-            Some(kv) => kv.shutdown().await,
-            None => Err(crate::runtime::UnitError::unknown(format!(
-                "kv store `{name}` not registered"
-            ))),
+        if let Some(kv) = self.kv_stores.remove(name) {
+            return kv.shutdown().await;
         }
+        if let Some(kv) = self.kv_instances.write().remove(name) {
+            return kv.shutdown().await;
+        }
+        Err(crate::runtime::UnitError::unknown(format!(
+            "kv store `{name}` not registered"
+        )))
     }
 
     /// Call [`Capability::shutdown()`] on all KV stores and remove them.
     pub async fn shutdown_all_kv(&mut self) -> UnitResult<()> {
-        let names: Vec<String> = self.kv_stores.keys().cloned().collect();
+        let names: Vec<String> = self
+            .kv_stores
+            .keys()
+            .chain(self.kv_instances.read().keys())
+            .cloned()
+            .collect();
         for name in names {
             self.shutdown_kv(&name).await?;
         }
@@ -269,16 +380,45 @@ impl CapabilityRegistry {
         self.sql_engines.insert(name, engine);
     }
 
-    pub fn sql(&self, name: &str) -> Option<&Arc<dyn CapabilitySqlEngine>> {
-        self.sql_engines.get(name)
+    pub fn set_sql_factory(
+        &mut self,
+        config_type: impl Into<String>,
+        factory: impl Fn(&crate::config::ConfigEntry) -> crate::runtime::UnitResult<Arc<dyn CapabilitySqlEngine>>
+            + Send
+            + Sync
+            + 'static,
+    ) {
+        self.sql_factories.insert(config_type.into(), Box::new(factory));
     }
 
-    pub fn default_sql(&self) -> Option<&Arc<dyn CapabilitySqlEngine>> {
+    pub fn sql(&self, id: &str) -> Option<Arc<dyn CapabilitySqlEngine>> {
+        if let Some(inst) = self.sql_engines.get(id) {
+            return Some(inst.clone());
+        }
+        if let Some(inst) = self.sql_instances.read().get(id) {
+            return Some(inst.clone());
+        }
+        let config_guard = crate::config::read();
+        let entry = config_guard.entry(id)?;
+        let factory = self.sql_factories.get(&entry.config_type)?;
+        let instance = factory(entry).ok()?;
+        drop(config_guard);
+        self.sql_instances
+            .write()
+            .insert(id.to_string(), instance.clone());
+        Some(instance)
+    }
+
+    pub fn default_sql(&self) -> Option<Arc<dyn CapabilitySqlEngine>> {
         self.sql("default")
     }
 
     pub fn sql_names(&self) -> impl Iterator<Item = &String> {
         self.sql_engines.keys()
+    }
+
+    pub fn sql_factory_names(&self) -> impl Iterator<Item = &String> {
+        self.sql_factories.keys()
     }
 
     pub async fn init_sql(&self, name: &str) -> UnitResult<()> {
@@ -323,16 +463,44 @@ impl CapabilityRegistry {
         self.document_dbs.insert(name, db);
     }
 
-    pub fn doc(&self, name: &str) -> Option<&Arc<dyn CapabilityDocumentDatabase>> {
-        self.document_dbs.get(name)
+    pub fn set_doc_factory(
+        &mut self,
+        config_type: impl Into<String>,
+        factory: impl Fn(&crate::config::ConfigEntry) -> crate::runtime::UnitResult<Arc<dyn CapabilityDocumentDatabase>>
+            + Send
+            + Sync
+            + 'static,
+    ) {
+        self.doc_factories.insert(config_type.into(), Box::new(factory));
     }
 
-    pub fn default_doc(&self) -> Option<&Arc<dyn CapabilityDocumentDatabase>> {
+    pub fn doc(&self, id: &str) -> Option<Arc<dyn CapabilityDocumentDatabase>> {
+        if let Some(inst) = self.document_dbs.get(id) {
+            return Some(inst.clone());
+        }
+        if let Some(inst) = self.doc_instances.read().get(id) {
+            return Some(inst.clone());
+        }
+        let config_guard = crate::config::read();
+        let entry = config_guard.entry(id)?;
+        let factory = self.doc_factories.get(&entry.config_type)?;
+        let instance = factory(&entry).ok()?;
+        self.doc_instances
+            .write()
+            .insert(id.to_string(), instance.clone());
+        Some(instance)
+    }
+
+    pub fn default_doc(&self) -> Option<Arc<dyn CapabilityDocumentDatabase>> {
         self.doc("default")
     }
 
     pub fn doc_names(&self) -> impl Iterator<Item = &String> {
         self.document_dbs.keys()
+    }
+
+    pub fn doc_factory_names(&self) -> impl Iterator<Item = &String> {
+        self.doc_factories.keys()
     }
 
     pub async fn init_doc(&self, name: &str) -> UnitResult<()> {
@@ -377,16 +545,45 @@ impl CapabilityRegistry {
         self.spreadsheets.insert(name, engine);
     }
 
-    pub fn spreadsheet(&self, name: &str) -> Option<&Arc<dyn CapabilitySpreadsheetEngine>> {
-        self.spreadsheets.get(name)
+    pub fn set_spreadsheet_factory(
+        &mut self,
+        config_type: impl Into<String>,
+        factory: impl Fn(&crate::config::ConfigEntry) -> crate::runtime::UnitResult<Arc<dyn CapabilitySpreadsheetEngine>>
+            + Send
+            + Sync
+            + 'static,
+    ) {
+        self.spreadsheet_factories
+            .insert(config_type.into(), Box::new(factory));
     }
 
-    pub fn default_spreadsheet(&self) -> Option<&Arc<dyn CapabilitySpreadsheetEngine>> {
+    pub fn spreadsheet(&self, id: &str) -> Option<Arc<dyn CapabilitySpreadsheetEngine>> {
+        if let Some(inst) = self.spreadsheets.get(id) {
+            return Some(inst.clone());
+        }
+        if let Some(inst) = self.spreadsheet_instances.read().get(id) {
+            return Some(inst.clone());
+        }
+        let config_guard = crate::config::read();
+        let entry = config_guard.entry(id)?;
+        let factory = self.spreadsheet_factories.get(&entry.config_type)?;
+        let instance = factory(&entry).ok()?;
+        self.spreadsheet_instances
+            .write()
+            .insert(id.to_string(), instance.clone());
+        Some(instance)
+    }
+
+    pub fn default_spreadsheet(&self) -> Option<Arc<dyn CapabilitySpreadsheetEngine>> {
         self.spreadsheet("default")
     }
 
     pub fn spreadsheet_names(&self) -> impl Iterator<Item = &String> {
         self.spreadsheets.keys()
+    }
+
+    pub fn spreadsheet_factory_names(&self) -> impl Iterator<Item = &String> {
+        self.spreadsheet_factories.keys()
     }
 
     pub async fn init_spreadsheet(&self, name: &str) -> UnitResult<()> {
@@ -438,18 +635,26 @@ fn registry() -> &'static RwLock<CapabilityRegistry> {
     CAPABILITIES.get_or_init(|| RwLock::new(CapabilityRegistry::new()))
 }
 
-/// Register capabilities into the global registry.
+/// Register capabilities or factories into the global registry.
 ///
-/// Called by capability plugins at load time. Does **not** call
-/// [`Capability::init()`] — use the global `init_*` functions or
-/// [`write()`] → `init_all_xxx()` after registration.
+/// Called by capability plugins at load time.
 ///
-/// # Example
+/// # Example (pre-built instance)
 ///
 /// ```ignore
 /// capability::register(|reg| {
-///     reg.set_kv(Arc::new(RedisKV::new(...)));
-///     reg.set_kv(Arc::new(HBaseKV::new(...)));
+///     reg.set_kv(Arc::new(InMemoryKV::new()));
+/// });
+/// ```
+///
+/// # Example (factory for config-driven creation)
+///
+/// ```ignore
+/// capability::register(|reg| {
+///     reg.set_kv_factory("redis", |entry| {
+///         let cfg: RedisConfig = serde_json::from_value(entry.data.clone())?;
+///         Ok(Arc::new(RedisCapability::new(&cfg.connection_url())?))
+///     });
 /// });
 /// ```
 pub fn register(f: impl FnOnce(&mut CapabilityRegistry)) {
@@ -457,20 +662,45 @@ pub fn register(f: impl FnOnce(&mut CapabilityRegistry)) {
 }
 
 /// Acquire a read lock on the global capability registry.
-///
-/// Use this for capability lookups. For lifecycle operations
-/// (init, shutdown), use [`write()`] instead.
 pub fn read() -> parking_lot::RwLockReadGuard<'static, CapabilityRegistry> {
     registry().read()
 }
 
 /// Acquire a write lock on the global capability registry.
-///
-/// Use this for lifecycle operations ([`CapabilityRegistry::init_kv`],
-/// [`CapabilityRegistry::shutdown_kv`], etc.) that mutate the registry
-/// or require exclusive access.
 pub fn write() -> parking_lot::RwLockWriteGuard<'static, CapabilityRegistry> {
     registry().write()
+}
+
+/// Get-or-create a [`CapabilityKeyValueStore`] by config instance ID.
+///
+/// This is the primary access point for unit plugins. It handles
+/// pre-built instances, cached lazy instances, and factory-based
+/// creation transparently.
+///
+/// # Example
+///
+/// ```ignore
+/// let redis = capability::kv("redis-cache")
+///     .ok_or_else(|| UnitError::unknown("redis-cache not available"))?;
+/// redis.set("key", b"value").await?;
+/// ```
+pub fn kv(id: &str) -> Option<Arc<dyn CapabilityKeyValueStore>> {
+    registry().read().kv(id)
+}
+
+/// Get-or-create a [`CapabilitySqlEngine`] by config instance ID.
+pub fn sql(id: &str) -> Option<Arc<dyn CapabilitySqlEngine>> {
+    registry().read().sql(id)
+}
+
+/// Get-or-create a [`CapabilityDocumentDatabase`] by config instance ID.
+pub fn doc(id: &str) -> Option<Arc<dyn CapabilityDocumentDatabase>> {
+    registry().read().doc(id)
+}
+
+/// Get-or-create a [`CapabilitySpreadsheetEngine`] by config instance ID.
+pub fn spreadsheet(id: &str) -> Option<Arc<dyn CapabilitySpreadsheetEngine>> {
+    registry().read().spreadsheet(id)
 }
 
 // ============================================================

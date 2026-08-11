@@ -19,3 +19,4 @@ anyhow = "1.0.100"
 parking_lot = "0.12.5"
 linkme = "0.3.35"
 async-trait = "0.1.83"
+mlua = { version = "0.10.2", features = ["lua54", "send", "async"] }

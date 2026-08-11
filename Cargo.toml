@@ -11,6 +11,7 @@ members = [
     "crates/fusion-unit-sdk",
     "tests/fusion-unit-tests",
     "crates/fusion-plugins/capability/fusion-capability-example",
+    "crates/fusion-plugins/capability/fusion-capability-redis",
     "crates/fusion-plugins/units/fusion-unit-datafusion",
     "crates/fusion-plugins/units/fusion-unit-excel",
     "crates/fusion-plugins/units/fusion-unit-net",

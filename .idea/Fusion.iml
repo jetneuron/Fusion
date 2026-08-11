@@ -25,6 +25,7 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/fusion-runtime/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/fusion-runtime/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/fusion-plugins/capability/fusion-capability-example/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/fusion-plugins/capability/fusion-capability-redis/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/fusion-plugins/units/fusion-unit-datafusion/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/fusion-plugins/units/fusion-unit-datafusion/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/fusion-plugins/units/fusion-unit-excel/src" isTestSource="false" />

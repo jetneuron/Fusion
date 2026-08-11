@@ -16,6 +16,9 @@ fusion-unit-datafusion = { path = "../../crates/fusion-plugins/units/fusion-unit
 fusion-unit-excel = { path = "../../crates/fusion-plugins/units/fusion-unit-excel" }
 fusion-unit-ssh = { path = "../../crates/fusion-plugins/units/fusion-unit-ssh" }
 fusion-unit-universal-fs = { path = "../../crates/fusion-plugins/units/fusion-unit-universal-fs" }
+fusion-unit-redis = { path = "../../crates/fusion-plugins/units/fusion-unit-redis" }
+fusion-capability-example = { path = "../../crates/fusion-plugins/capability/fusion-capability-example" }
+fusion-capability-redis = { path = "../../crates/fusion-plugins/capability/fusion-capability-redis" }
 anyhow = "1.0.100"
 log = "0.4.29"
 
