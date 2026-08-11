@@ -197,7 +197,7 @@ impl PhysicalTask {
             {
                 Ok(_) => {}
                 Err(error) => {
-                    eprintln!("fail to launch {:?}", error);
+                    return Err(anyhow::anyhow!("fail to launch: {error}"));
                 }
             };
             Ok(())

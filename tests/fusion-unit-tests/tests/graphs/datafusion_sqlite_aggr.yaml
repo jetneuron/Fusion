@@ -1,0 +1,25 @@
+name: datafusion_sqlite_aggregation_test
+
+units:
+  - id: df-reader
+    type: SqlUnitTask
+    version: unstable
+    config:
+      datasource: datafusion
+      sql: "SELECT * FROM dept_stats ORDER BY count DESC"
+      tables:
+        - name: dept_stats
+          provider: sqlite
+          config_id: sqlite-test-db
+          sql: "SELECT department, COUNT(*) as count, AVG(salary) as avg_salary, SUM(score) as total_score, COUNT(score) as score_count FROM employees GROUP BY department"
+
+  - id: output
+    type: DebugOutputUnitTask
+    version: builtin
+    config:
+      show_report: true
+
+edges:
+  - id: e1
+    source: df-reader
+    target: output

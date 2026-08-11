@@ -15,6 +15,10 @@ use crate::runtime::UnitResult;
 pub trait CapabilitySqlEngine: Capability {
     /// Execute a SQL query and return results as Rows.
     async fn query(&self, sql: &str) -> UnitResult<Vec<crate::proto::transfer::Row>>;
+
+    /// Enable downcasting to concrete implementations (e.g. DataFusion)
+    /// for access to engine-specific APIs like `SessionContext`.
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 /// Well-known `CapabilitySqlEngine` capability names.

@@ -12,11 +12,13 @@ fusion-unit-sdk = { path = "../../crates/fusion-unit-sdk" }
 libloading = "0.8.6"
 serde_json = "1.0.134"
 # unit extension plugins.
-fusion-unit-datafusion = { path = "../../crates/fusion-plugins/units/fusion-unit-datafusion" }
 fusion-unit-excel = { path = "../../crates/fusion-plugins/units/fusion-unit-excel" }
 fusion-unit-ssh = { path = "../../crates/fusion-plugins/units/fusion-unit-ssh" }
 fusion-unit-universal-fs = { path = "../../crates/fusion-plugins/units/fusion-unit-universal-fs" }
 fusion-unit-redis = { path = "../../crates/fusion-plugins/units/fusion-unit-redis" }
+fusion-unit-datafusion = { path = "../../crates/fusion-plugins/units/fusion-unit-datafusion" }
+fusion-capability-datafusion = { path = "../../crates/fusion-plugins/capability/fusion-capability-datafusion" }
+fusion-unit-datafusion-sqlite = { path = "../../crates/fusion-plugins/units/fusion-unit-datafusion/providers/fusion-unit-datafusion-sqlite" }
 fusion-capability-example = { path = "../../crates/fusion-plugins/capability/fusion-capability-example" }
 fusion-capability-redis = { path = "../../crates/fusion-plugins/capability/fusion-capability-redis" }
 anyhow = "1.0.100"

@@ -1,0 +1,24 @@
+name: datafusion_sqlite_source_test
+
+units:
+  - id: df-reader
+    type: SqlUnitTask
+    version: unstable
+    config:
+      datasource: datafusion
+      sql: "SELECT * FROM users ORDER BY id"
+      tables:
+        - name: users
+          provider: sqlite
+          config_id: sqlite-test-db
+
+  - id: output
+    type: DebugOutputUnitTask
+    version: builtin
+    config:
+      show_report: true
+
+edges:
+  - id: e1
+    source: df-reader
+    target: output

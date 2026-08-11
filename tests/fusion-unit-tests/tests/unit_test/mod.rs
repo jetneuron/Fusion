@@ -1,6 +1,7 @@
 use crate::execute_with_env;
 use serde_json::json;
 
+mod datafusion_test;
 mod filesystem_test;
 mod redis_test;
 mod ssh_test;

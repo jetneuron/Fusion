@@ -12,10 +12,10 @@ use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
 
 use fusion_streaming::runtime::core::LaunchEnv;
 use fusion_streaming::utils::tera_func::RegisterTeraBuiltinFunc;
-use fusion_unit_datafusion::datafusion_unit::DataFusionUnit;
 use fusion_unit_excel::SpreadSheetUnitTask;
 use fusion_unit_ssh::SSHUnitTask;
 use fusion_unit_universal_fs::UniversalFsUnitTask;
+use fusion_unit_datafusion::SqlUnitTask;
 use fusion_unit_redis::RedisUnitTask;
 use libloading::{Library, Symbol};
 use serde_json::{json, Value};
@@ -35,9 +35,6 @@ impl GraphUnitPlugin for TestPlugin {
         // Excel
         SpreadSheetUnitTask::register_unit(&mut manifest, self.plugin_version());
 
-        // DataFusion
-        DataFusionUnit::register_unit(&mut manifest, self.plugin_version());
-
         // SSH
         SSHUnitTask::register_unit(&mut manifest, self.plugin_version());
 
@@ -46,6 +43,9 @@ impl GraphUnitPlugin for TestPlugin {
 
         // Redis (script-driven KV)
         RedisUnitTask::register_unit(&mut manifest, self.plugin_version());
+
+        // DataFusion (SQL engine)
+        SqlUnitTask::register_unit(&mut manifest, self.plugin_version());
         manifest
     }
 }

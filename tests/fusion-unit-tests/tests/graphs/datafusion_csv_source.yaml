@@ -1,0 +1,24 @@
+name: datafusion_csv_source_test
+
+units:
+  - id: df-reader
+    type: SqlUnitTask
+    version: unstable
+    config:
+      datasource: datafusion
+      sql: "SELECT * FROM csv_data"
+      tables:
+        - name: csv_data
+          provider: csv
+          config_id: csv-test-data
+
+  - id: output
+    type: DebugOutputUnitTask
+    version: builtin
+    config:
+      show_report: true
+
+edges:
+  - id: e1
+    source: df-reader
+    target: output

@@ -50,12 +50,12 @@ fn impl_logical_task_trait(ast: &syn::DeriveInput, tp: i32) -> TokenStream {
                 let arc_ctx = Arc::new(*ctx);
                 let box_pin = Box::pin(async move {
                     let __self = self;
-                    let () = {
-                        let unit_id = arc_ctx.unit.get_id().clone();
-                        __self.launch(arc_ctx.clone())?.await?;
-                        arc_ctx.send(fusion_unit_sdk::proto::transfer::Row::eof(unit_id)).await;
-                    };
-                    Ok(())
+                    let unit_id = arc_ctx.unit.get_id().clone();
+                    let result = __self.launch(arc_ctx.clone())?.await;
+                    // Always send EOF so downstream tasks can terminate,
+                    // even if launch returned an error.
+                    arc_ctx.send(fusion_unit_sdk::proto::transfer::Row::eof(unit_id)).await;
+                    result
                });
                Ok(box_pin)
             }

@@ -11,10 +11,12 @@ members = [
     "crates/fusion-unit-sdk",
     "tests/fusion-unit-tests",
     "crates/fusion-plugins/capability/fusion-capability-example",
+    "crates/fusion-plugins/capability/fusion-capability-datafusion",
     "crates/fusion-plugins/capability/fusion-capability-redis",
-    "crates/fusion-plugins/units/fusion-unit-datafusion",
     "crates/fusion-plugins/units/fusion-unit-excel",
     "crates/fusion-plugins/units/fusion-unit-net",
+    "crates/fusion-plugins/units/fusion-unit-datafusion",
+    "crates/fusion-plugins/units/fusion-unit-datafusion/providers/fusion-unit-datafusion-sqlite",
     "crates/fusion-plugins/units/fusion-unit-redis",
     "crates/fusion-plugins/units/fusion-unit-ssh",
     "crates/fusion-plugins/units/fusion-unit-universal-fs",
@@ -24,7 +26,6 @@ resolver = "3"
 [workspace.dependencies]
 fusion-streaming = { path = "crates/fusion-streaming" }
 fusion-unit-sdk = { path = "crates/fusion-unit-sdk" }
-fusion-unit-datafusion = { path = "crates/fusion-plugins/units/fusion-unit-datafusion" }
 fusion-unit-excel = { path = "crates/fusion-plugins/units/fusion-unit-excel" }
 fusion-unit-ssh = { path = "crates/fusion-plugins/units/fusion-unit-ssh" }
 fusion-unit-redis = { path = "crates/fusion-plugins/units/fusion-unit-redis" }
@@ -32,7 +33,9 @@ fusion-unit-net = { path = "crates/fusion-plugins/units/fusion-unit-net" }
 fusion-unit-universal-fs = { path = "crates/fusion-plugins/units/fusion-unit-universal-fs" }
 fusion-derive = { path = "crates/fusion-derive" }
 fusion-script-ts = { path = "crates/scripts/fusion-script-ts" }
+fusion-capability-datafusion = { path = "crates/fusion-plugins/capability/fusion-capability-datafusion" }
 fusion-capability-example = { path = "crates/fusion-plugins/capability/fusion-capability-example" }
+fusion-unit-datafusion = { path = "crates/fusion-plugins/units/fusion-unit-datafusion" }
 
 [profile.dev]
 debug = true

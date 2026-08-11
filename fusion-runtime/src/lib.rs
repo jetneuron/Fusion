@@ -324,7 +324,7 @@ impl FusionRuntimeBuilder {
     pub fn with_datafusion(mut self) -> Self {
         self.unit_plugins.push((
             "datafusion".into(),
-            Box::new(fusion_unit_datafusion::ApacheDataFusionPlugin {}),
+            Box::new(fusion_unit_datafusion::SqlUnitPlugin {}),
         ));
         self
     }

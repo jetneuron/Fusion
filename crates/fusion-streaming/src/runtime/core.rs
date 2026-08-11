@@ -341,9 +341,26 @@ impl PhysicalGraph {
         }
 
         let clock = Instant::now();
-        if let Err(err) = futures::future::try_join_all(join_handles).await {
-            log::error!("Task Failed! {:?}", err);
-        };
+        let join_results = futures::future::join_all(join_handles).await;
+        for result in join_results {
+            match result {
+                Err(join_err) => {
+                    // tokio panic in task
+                    log::error!("Task panicked! {:?}", join_err);
+                    return Err(fusion_unit_sdk::runtime::UnitError::unknown(format!(
+                        "graph execution failed (panic): {join_err}"
+                    )));
+                }
+                Ok(Err(task_err)) => {
+                    // task returned an error
+                    log::error!("Task Failed! {:?}", task_err);
+                    return Err(fusion_unit_sdk::runtime::UnitError::unknown(format!(
+                        "graph execution failed: {task_err}"
+                    )));
+                }
+                Ok(Ok(())) => { /* task succeeded */ }
+            }
+        }
 
         info!(
             "Execute graph had been finished. Elapsed {}ms",
