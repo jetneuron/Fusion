@@ -8,12 +8,20 @@ use fusion_unit_sdk::runtime::script_engine_factory::ScriptEngineFactory;
 use fusion_unit_sdk::runtime::state::{GraphStates, State};
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use linkme::distributed_slice;
-use log::{debug, warn};
-use mlua::{AnyUserData, Function, Lua};
+use log::debug;
+use mlua::{Function, Lua, Table};
 use std::pin::Pin;
 use std::sync::Arc;
 use tera::Tera;
 use tokio::sync::Mutex;
+
+/// Key under which the compiled Lua function is stored in the node's
+/// scope table.
+const SCOPE_FUNC_KEY: &str = "func";
+
+/// Key under which an optional `this` userdata is stored in the scope
+/// table. Set by units (e.g. RedisUnitTask) during init.
+const SCOPE_THIS_KEY: &str = "this";
 
 #[derive(Default, ScriptEngine)]
 #[script_type = "lua"]
@@ -62,75 +70,54 @@ impl Scripter for LuaScript {
         states: GraphStates,
         ctx: &TaskContext,
         row: Row,
-        this_key: Option<mlua::RegistryKey>,
     ) -> Pin<Box<dyn Future<Output = UnitResult<()>> + Send>>
     where
         'life0: 'async_trait,
         Self: 'async_trait,
     {
         let inner_states = self.states.clone();
-        let func_name = format!("lua_script_{}", task_id.replace('-', "_"));
         let scripts = self.inner.lines().collect::<Vec<&str>>().join("\n  ");
-        let ctx = LuaContext::wrap(ctx.clone());
+        let lua_ctx = LuaContext::wrap(ctx.clone());
         let arc_row = Arc::new(Mutex::new(row));
+        // Scope name matches what init_script_env() / shutdown() use.
+        let scope_name = task_id.to_string();
         Box::pin(async move {
             let lua_ref = inner_states.state::<GraphLua>()?;
-            let lua_mutex = lua_ref.0.lock().await;
-            let globals = lua_mutex.globals();
+            let lua = lua_ref.0.lock().await;
+            let globals = lua.globals();
 
-            // Retrieve `this` userdata from registry if a key was provided.
-            let this_val: Option<AnyUserData> = match this_key {
-                Some(ref key) => Some(lua_mutex.registry_value(key).map_err(|e| {
-                    UnitError::unknown(format!("Failed to retrieve registry value: {e}"))
-                })?),
-                None => None,
-            };
+            let scope_table: Table = globals
+                .get(scope_name.clone())
+                .map_err(|_| UnitError::unknown(format!("scope table `{scope_name}` not found")))?;
 
-            let has_this = this_val.is_some();
-            let func = match globals.get::<Function>(func_name.clone()) {
-                Ok(func) => func,
-                Err(err) => {
-                    debug!(
-                        "Lua func: {func_name} not exist, create new chunk. reason: {}",
-                        err.to_string()
-                    );
-                    let chunk = if has_this {
-                        format!(
-                            r#"
-	function {func_name}(ctx, data, this)
-	  {scripts}
-	  return true
-	end"#
-                        )
-                    } else {
-                        format!(
-                            r#"
-	function {func_name}(ctx, data)
-	  {scripts}
-	  return true
-	end"#
-                        )
-                    };
-
-                    log::debug!("lua code: {}", &chunk);
-                    lua_mutex.load(chunk).exec().map_err(|err| {
-                        UnitError::unknown(format!("Load lua script failed: {}", err.to_string()))
+            // Always use the same function signature — (ctx, data, this).
+            // `this` may be nil when no userdata has been injected.
+            let func = match scope_table.get::<Function>(SCOPE_FUNC_KEY) {
+                Ok(f) => f,
+                Err(_) => {
+                    let chunk =
+                        format!("local ctx, data, this = ...\n{scripts}\nreturn true");
+                    let func: Function = lua
+                        .load(&chunk)
+                        .into_function()
+                        .map_err(|e| UnitError::unknown(format!("Lua compile: {e}")))?;
+                    scope_table.set(SCOPE_FUNC_KEY, func.clone()).map_err(|e| {
+                        UnitError::unknown(format!("set scope func: {e}"))
                     })?;
-                    globals.get::<Function>(func_name).expect("")
+                    func
                 }
             };
 
             let lua_row = LuaRow::wrap(arc_row).await;
-            let result = if let Some(inner_this) = this_val {
-                func.call_async::<bool>((ctx, lua_row, inner_this)).await
-            } else {
-                func.call_async::<bool>((ctx, lua_row)).await
-            };
-            match result {
+
+            // `this` is nil when no userdata injected (e.g. plain MapUnitTask).
+            let this_val = scope_table
+                .get::<mlua::Value>(SCOPE_THIS_KEY)
+                .unwrap_or(mlua::Value::Nil);
+            let exec_result = func.call_async::<bool>((lua_ctx, lua_row, this_val)).await;
+            match exec_result {
                 Ok(_) => {}
-                Err(err) => {
-                    println!("{}", err);
-                }
+                Err(err) => println!("{err}"),
             };
             Ok(())
         })
@@ -141,6 +128,6 @@ pub struct GraphLua(pub Arc<Mutex<Lua>>);
 
 impl State for GraphLua {}
 
-pub(crate) struct GraphTera(pub(crate) Arc<Mutex<Tera>>);
+pub struct GraphTera(pub Arc<Mutex<Tera>>);
 
 impl State for GraphTera {}

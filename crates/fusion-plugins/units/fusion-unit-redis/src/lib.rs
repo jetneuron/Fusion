@@ -38,7 +38,7 @@
 //! ```
 
 use fusion_derive::LogicalTask;
-use fusion_streaming::runtime::scripts::GraphLua;
+use fusion_streaming::runtime::scripts::{GraphLua, GraphTera};
 use fusion_unit_sdk::capability::CapabilityKeyValueStore;
 use fusion_unit_sdk::capability::capability_key_value_store::ScanOptions;
 use fusion_unit_sdk::graph::types::{
@@ -48,10 +48,11 @@ use fusion_unit_sdk::proto::transfer::Row;
 use fusion_unit_sdk::runtime::logical::LogicalTaskMeta;
 use fusion_unit_sdk::runtime::script::Scripter;
 use fusion_unit_sdk::runtime::script::script_registry;
+use fusion_unit_sdk::runtime::state::GraphStates;
 use fusion_unit_sdk::runtime::UnitResult;
 use fusion_unit_sdk::units::config_util::UnitConfigExt;
 use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
-use mlua::{RegistryKey, UserData, UserDataMethods};
+use mlua::{UserData, UserDataMethods};
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -86,7 +87,6 @@ struct LuaKvStore {
     store: Arc<dyn CapabilityKeyValueStore>,
 }
 
-/// Convert `UnitError` to `mlua::Error`.
 fn to_lua_err(e: fusion_unit_sdk::runtime::UnitError) -> mlua::Error {
     mlua::Error::external(e.to_string())
 }
@@ -159,6 +159,19 @@ impl UserData for LuaKvStore {
 }
 
 // ============================================================
+// Script execution mode
+// ============================================================
+
+/// How the Lua script is executed.
+enum ScriptMode {
+    /// Static script — compiled once via scripter, cached across rows.
+    Static(Arc<Mutex<Box<dyn Scripter + Send>>>),
+    /// Dynamic script with `{{ ... }}` Tera placeholders baked in.
+    /// Rendered per-row (context varies), executed as a raw Lua chunk.
+    Dynamic { template: String },
+}
+
+// ============================================================
 // RedisUnitTask
 // ============================================================
 
@@ -167,10 +180,11 @@ pub struct RedisUnitTask {
     meta: UnitMeta,
     /// Config entry ID (e.g. "redis-cache").
     datasource: String,
-    /// Resolved capability.
+    /// Resolved capability instance.
     store: Option<Arc<dyn CapabilityKeyValueStore>>,
-    /// Lua scripter.
-    scripter: Option<Arc<Mutex<Box<dyn Scripter + Send>>>>,
+    /// Script execution strategy — chosen in init() based on whether
+    /// the script contains Tera expressions and the node role.
+    script_mode: Option<ScriptMode>,
 }
 
 impl InitUnit for RedisUnitTask {
@@ -179,6 +193,7 @@ impl InitUnit for RedisUnitTask {
             .get_config()
             .ok_or_else(|| fusion_unit_sdk::runtime::UnitError::config_required("config"))?;
 
+        // Resolve capability by config instance ID.
         self.datasource = conf.require_string("datasource")?;
         self.store = Some(
             fusion_unit_sdk::capability::kv(&self.datasource).ok_or_else(|| {
@@ -189,7 +204,7 @@ impl InitUnit for RedisUnitTask {
             })?,
         );
 
-        let script = conf.require_string("$script")?;
+        let raw_script = conf.require_string("$script")?;
         let states = unit
             .get_runtime_states()
             .ok_or_else(|| {
@@ -202,64 +217,221 @@ impl InitUnit for RedisUnitTask {
             .unwrap_or_else(|| "lua".into())
             .to_lowercase();
 
-        self.scripter = Some(script_registry::create_scripter(
-            &script_type,
-            script,
-            states,
-        ));
+        let has_tera = raw_script.contains("{{");
+
+        self.script_mode = if has_tera && unit.is_source() {
+            // Source + Tera: render once, compile once via scripter.
+            let tera_state = states.state::<GraphTera>().map_err(|e| {
+                fusion_unit_sdk::runtime::UnitError::ScriptInitErr(format!(
+                    "GraphTera not found: {e}"
+                ))
+            })?;
+            let mut tera = tera_state.0.try_lock().map_err(|_| {
+                fusion_unit_sdk::runtime::UnitError::ScriptInitErr(
+                    "Tera engine is busy".into(),
+                )
+            })?;
+            let rendered = tera
+                .render_str(&raw_script, &tera::Context::new())
+                .map_err(|e| {
+                    fusion_unit_sdk::runtime::UnitError::ScriptInitErr(format!(
+                        "Tera render failed: {e}"
+                    ))
+                })?;
+            drop(tera);
+            let scripter = script_registry::create_scripter(&script_type, rendered, states);
+            Some(ScriptMode::Static(scripter))
+        } else if has_tera && unit.is_mapper() {
+            // Map + Tera: render per-row, execute as raw Lua chunk.
+            Some(ScriptMode::Dynamic {
+                template: raw_script,
+            })
+        } else {
+            // No Tera: static script via scripter (source or map).
+            let scripter = script_registry::create_scripter(&script_type, raw_script, states);
+            Some(ScriptMode::Static(scripter))
+        };
 
         Ok(())
     }
 }
 
 impl RedisUnitTask {
-    /// Lazily create the Lua registry entry for `this`.
-    async fn make_this_key(
-        &self,
-        states: &fusion_unit_sdk::runtime::state::GraphStates,
-    ) -> UnitResult<RegistryKey> {
-        let lua_state = states.state::<GraphLua>().map_err(|e| {
-            fusion_unit_sdk::runtime::UnitError::unknown(format!("GraphLua not found: {e}"))
-        })?;
-        let lua = lua_state.0.lock().await;
-        let store = self
-            .store
-            .clone()
-            .ok_or_else(|| fusion_unit_sdk::runtime::UnitError::unknown("store not initialized"))?;
+    /// Inject `this` userdata into scope table. Sync — caller holds Lua lock.
+    fn inject_this_into_scope(
+        lua: &mlua::Lua,
+        scope_table: &mlua::Table,
+        store: Arc<dyn CapabilityKeyValueStore>,
+    ) -> UnitResult<()> {
         let ud = lua
             .create_userdata(LuaKvStore { store })
             .map_err(|e| {
+                fusion_unit_sdk::runtime::UnitError::unknown(format!("create LuaKvStore: {e}"))
+            })?;
+        scope_table.set("this", ud).map_err(|e| {
+            fusion_unit_sdk::runtime::UnitError::unknown(format!("set this: {e}"))
+        })
+    }
+
+    /// Execute via the cached scripter (static script, no per-row Tera).
+    async fn run_static(
+        &self,
+        row: Row,
+        ctx: &TaskContext,
+        states: &GraphStates,
+        scripter: &Arc<Mutex<Box<dyn Scripter + Send>>>,
+    ) -> UnitResult<()> {
+        let task_id = self.meta.get_id();
+
+        // Inject `this` userdata if not already present.
+        {
+            let lua_ref = states.state::<GraphLua>().map_err(|e| {
+                fusion_unit_sdk::runtime::UnitError::unknown(format!("GraphLua not found: {e}"))
+            })?;
+            let lua = lua_ref.0.lock().await;
+            let globals = lua.globals();
+            let scope_table: mlua::Table = globals.get(task_id.as_str()).map_err(|_| {
                 fusion_unit_sdk::runtime::UnitError::unknown(format!(
-                    "create LuaKvStore userdata: {e}"
+                    "scope table `{task_id}` not ready"
                 ))
             })?;
-        lua.create_registry_value(ud).map_err(|e| {
-            fusion_unit_sdk::runtime::UnitError::unknown(format!("create registry value: {e}"))
-        })
+            Self::inject_this_into_scope(
+                &lua,
+                &scope_table,
+                self.store
+                    .clone()
+                    .ok_or_else(|| fusion_unit_sdk::runtime::UnitError::unknown("store not ready"))?,
+            )?;
+        }
+
+        let scripter = scripter.lock().await;
+        scripter.row_eval(&task_id, states.clone(), ctx, row).await
+    }
+
+    /// Execute with per-row Tera rendering (map mode only).
+    async fn run_dynamic(
+        &self,
+        row: Row,
+        ctx: &TaskContext,
+        states: &GraphStates,
+        template: &str,
+    ) -> UnitResult<()> {
+        use fusion_streaming::runtime::core::LuaContext;
+        let task_id = self.meta.get_id();
+
+        let lua_state = states.state::<GraphLua>().map_err(|e| {
+            fusion_unit_sdk::runtime::UnitError::unknown(format!("GraphLua not found: {e}"))
+        })?;
+
+        // Render Tera with row column values.
+        let mut tera_ctx = tera::Context::new();
+        for col in &row.columns {
+            let val = match col.dt.unwrap() {
+                fusion_unit_sdk::proto::transfer::DataType::str => col.str_val.clone(),
+                fusion_unit_sdk::proto::transfer::DataType::i32 => col.i32_val.to_string(),
+                fusion_unit_sdk::proto::transfer::DataType::i64 => col.i64_val.to_string(),
+                fusion_unit_sdk::proto::transfer::DataType::f32 => col.f32_val.to_string(),
+                fusion_unit_sdk::proto::transfer::DataType::f64 => col.f64_val.to_string(),
+                fusion_unit_sdk::proto::transfer::DataType::bool => col.bool_val.to_string(),
+                _ => String::new(),
+            };
+            tera_ctx.insert(&col.field, &val);
+        }
+
+        let tera_state = states.state::<GraphTera>().map_err(|e| {
+            fusion_unit_sdk::runtime::UnitError::unknown(format!("GraphTera not found: {e}"))
+        })?;
+        let mut tera = tera_state.0.lock().await;
+        let script = tera
+            .render_str(template, &tera_ctx)
+            .map_err(|e| fusion_unit_sdk::runtime::UnitError::unknown(format!("Tera: {e}")))?;
+        drop(tera);
+
+        // Execute as raw Lua chunk.
+        let lua = lua_state.0.lock().await;
+
+        // Build data table from row columns.
+        let data = lua.create_table().map_err(|e| {
+            fusion_unit_sdk::runtime::UnitError::unknown(format!("create table: {e}"))
+        })?;
+        for col in &row.columns {
+            let r: mlua::Result<()> = match col.dt.unwrap() {
+                fusion_unit_sdk::proto::transfer::DataType::str => {
+                    data.set(col.field.clone(), col.str_val.clone())
+                }
+                fusion_unit_sdk::proto::transfer::DataType::i32 => {
+                    data.set(col.field.clone(), col.i32_val)
+                }
+                fusion_unit_sdk::proto::transfer::DataType::i64 => {
+                    data.set(col.field.clone(), col.i64_val)
+                }
+                fusion_unit_sdk::proto::transfer::DataType::f32 => {
+                    data.set(col.field.clone(), col.f32_val)
+                }
+                fusion_unit_sdk::proto::transfer::DataType::f64 => {
+                    data.set(col.field.clone(), col.f64_val)
+                }
+                fusion_unit_sdk::proto::transfer::DataType::bool => {
+                    data.set(col.field.clone(), col.bool_val)
+                }
+                _ => Ok(()),
+            };
+            r.map_err(|e| {
+                fusion_unit_sdk::runtime::UnitError::unknown(format!("set column: {e}"))
+            })?;
+        }
+
+        let globals = lua.globals();
+        let scope_table: mlua::Table = globals.get(task_id.as_str()).map_err(|_| {
+            fusion_unit_sdk::runtime::UnitError::unknown(format!(
+                "scope table `{task_id}` not found"
+            ))
+        })?;
+        let this_val: mlua::Value = scope_table.get("this").map_err(|_| {
+            fusion_unit_sdk::runtime::UnitError::unknown("`this` not found in scope table")
+        })?;
+
+        let lua_ctx = LuaContext::wrap(ctx.clone());
+        let chunk = format!(
+            "local ctx, data, this = ...\n{}\nreturn true",
+            script
+        );
+        let func: mlua::Function = lua
+            .load(&chunk)
+            .into_function()
+            .map_err(|e| {
+                fusion_unit_sdk::runtime::UnitError::unknown(format!("Lua compile: {e}"))
+            })?;
+        func.call_async::<bool>((lua_ctx, data, this_val))
+            .await
+            .map_err(|e| {
+                fusion_unit_sdk::runtime::UnitError::unknown(format!("Lua exec: {e}"))
+            })?;
+        Ok(())
     }
 
     async fn run_script(
         &self,
         row: Row,
         ctx: &TaskContext,
-        states: &fusion_unit_sdk::runtime::state::GraphStates,
+        states: &GraphStates,
     ) -> UnitResult<()> {
-        let key = self.make_this_key(states).await?;
-        let scripter = self
-            .scripter
-            .as_ref()
-            .ok_or_else(|| fusion_unit_sdk::runtime::UnitError::unknown("scripter not ready"))?;
-        let scripter = scripter.lock().await;
-        let id = self.meta.get_id();
-        scripter
-            .row_eval(&id, states.clone(), ctx, row, Some(key))
-            .await?;
-        Ok(())
+        match self.script_mode.as_ref() {
+            Some(ScriptMode::Static(scripter)) => {
+                self.run_static(row, ctx, states, scripter).await
+            }
+            Some(ScriptMode::Dynamic { template }) => {
+                self.run_dynamic(row, ctx, states, template).await
+            }
+            None => Err(fusion_unit_sdk::runtime::UnitError::unknown(
+                "script mode not initialized",
+            )),
+        }
     }
 }
 
 // ============================================================
-// Source
+// Source — execute Lua once with empty seed row
 // ============================================================
 
 impl SourceUnit for RedisUnitTask {
@@ -269,14 +441,13 @@ impl SourceUnit for RedisUnitTask {
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send> {
         let states = ctx.states.clone();
         Ok(async move {
-            // Source mode: empty row as seed for the script.
             self.run_script(Row::new(), &ctx, &states).await
         })
     }
 }
 
 // ============================================================
-// Map
+// Map — execute Lua for each incoming row
 // ============================================================
 
 impl MapUnit for RedisUnitTask {

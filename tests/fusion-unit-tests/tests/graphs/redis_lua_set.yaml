@@ -6,7 +6,7 @@ units:
     type: DebugInputUnitTask
     version: builtin
     config:
-      times: 3
+      times: 300
       column_count: 2
       interval: 0
 
@@ -18,8 +18,9 @@ units:
       datasource: test-redis
       $script_type: lua
       $script: |
-        this:set(data['c0'], data['c1'])
-        this:expire(data['c0'], 120000)
+        local key = "event:{{yyyy_MM_dd()}}:{{now()}}" .. data['c0']
+        this:set(key, data['c1'])
+        this:expire(key, 120000)
         ctx:send(data)
 
   - id: output

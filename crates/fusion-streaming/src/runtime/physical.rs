@@ -496,15 +496,19 @@ impl PhysicalTask {
         let lua = lua_state.0.lock().await;
         let globals = lua.globals();
         let scope_name = self.get_lua_scope_name().await;
+
+        // Remove the per-task scope table. Because everything
+        // (compiled function, `this` userdata, …) is stored
+        // inside this table, a single remove cleans the entire
+        // node sandbox.
         globals.raw_remove(scope_name.clone()).map_err(|err| {
             UnitError::physical_error(format!(
-                "fail to remove lua script context: {}, err: {}",
-                scope_name,
-                err.to_string()
+                "fail to remove lua scope `{scope_name}`: {err}"
             ))
         })?;
+
         #[cfg(feature = "trace-physical")]
-        trace!("removed physical lua table. scope_name = {}", scope_name);
+        trace!("shutdown: removed lua scope `{scope_name}`");
         Ok(())
     }
 

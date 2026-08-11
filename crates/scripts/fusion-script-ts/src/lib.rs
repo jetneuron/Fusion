@@ -55,7 +55,6 @@ impl Scripter for TypeScript {
         states: GraphStates,
         ctx: &TaskContext,
         row: Row,
-        _this_key: Option<mlua::RegistryKey>,
     ) -> Pin<Box<dyn Future<Output = UnitResult<()>> + Send>>
     where
         'life0: 'async_trait,

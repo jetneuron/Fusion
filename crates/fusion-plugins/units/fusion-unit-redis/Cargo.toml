@@ -15,3 +15,4 @@ serde_json = "1.0.134"
 protobuf = "3.7.1"
 anyhow = "1.0.100"
 mlua = { version = "0.10.2", features = ["lua54", "send", "async"] }
+tera = "1.20.0"
