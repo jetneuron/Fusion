@@ -1,4 +1,3 @@
-mod datafusion;
 mod excel;
 mod unit_test;
 

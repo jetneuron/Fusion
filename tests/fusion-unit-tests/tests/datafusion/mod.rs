@@ -1,1 +1,0 @@
-mod datafusion_simple_test;
