@@ -40,6 +40,11 @@ impl GraphStates {
         }
     }
 
+    /// Returns the graph's unique identifier.
+    pub fn graph_id(&self) -> &str {
+        &self.graph_id
+    }
+
     pub fn register<T: State + Send + Sync + 'static>(&self, state: T) -> anyhow::Result<()> {
         let type_id = TypeId::of::<T>();
         let type_name = std::any::type_name::<T>();

@@ -2,12 +2,13 @@ use crate::proto::transfer::Row;
 use crate::runtime::logical::LogicalExecuteContext;
 use crate::runtime::state::GraphStates;
 use crate::runtime::UnitResult;
-use log::warn;
+use log::{debug, warn};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
 use std::future::Future;
 use std::ops::Index;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::broadcast::Sender;
 use tokio::sync::{Mutex, RwLock};
@@ -273,8 +274,8 @@ pub struct TaskContext {
 }
 
 pub struct Watermark {
-    pub send_offset: u64,
-    pub recv_offset: u64,
+    pub send_offset: AtomicU64,
+    pub recv_offset: AtomicU64,
     pub high: u64,
     pub low: u64,
     pub max: u64,
@@ -285,8 +286,8 @@ pub struct Watermark {
 impl Watermark {
     pub fn new(max: u64, high: u64, low: u64, upstream_remain: i8) -> Self {
         Self {
-            send_offset: 0,
-            recv_offset: 0,
+            send_offset: AtomicU64::new(0),
+            recv_offset: AtomicU64::new(0),
             high,
             low,
             max,
@@ -296,24 +297,30 @@ impl Watermark {
     }
 
     fn should_slow_down(&self) -> bool {
-        if self.recv_offset >= self.send_offset {
+        let send = self.send_offset.load(Ordering::Relaxed);
+        let recv = self.recv_offset.load(Ordering::Relaxed);
+        if recv >= send {
             return false;
         }
-        self.send_offset - self.recv_offset >= self.high
+        send - recv >= self.high
     }
 
     fn should_pause(&self) -> bool {
-        if self.recv_offset >= self.send_offset {
+        let send = self.send_offset.load(Ordering::Relaxed);
+        let recv = self.recv_offset.load(Ordering::Relaxed);
+        if recv >= send {
             return false;
         }
-        self.send_offset - self.recv_offset >= self.max
+        send - recv >= self.max
     }
 
     fn should_resume(&self) -> bool {
-        if self.recv_offset >= self.send_offset {
+        let send = self.send_offset.load(Ordering::Relaxed);
+        let recv = self.recv_offset.load(Ordering::Relaxed);
+        if recv >= send {
             return true;
         }
-        self.send_offset - self.recv_offset <= self.low
+        send - recv <= self.low
     }
 
     pub fn is_ultimate(&self) -> bool {
@@ -352,33 +359,35 @@ impl BackpressureSender {
     /// send row data with backpressure.
     pub async fn send(&self, mut row: Row) {
         loop {
-            let watermark = self.watermark.read().await;
-            if watermark.should_pause() {
-                warn!("watermark overflow, should be paused.");
-                tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+            let wm = self.watermark.read().await;
+            if wm.should_pause() {
+                // Gap >= max — consumer is far behind, sleep to give it CPU time.
+                drop(wm);
+                tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
                 continue;
-            } else if watermark.should_slow_down() {
-                warn!("watermark high position, should be slow down.");
-                tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
             }
+            if wm.should_slow_down() {
+                // Gap >= high — consumer is falling behind, yield to let it run.
+                drop(wm);
+                tokio::task::yield_now().await;
+                continue;
+            }
+
+            row.source = self.id.clone();
+            row.barrier_ref = {
+                let br = self.barrier_ref.lock().unwrap();
+                *br
+            };
+            let offset = {
+                let mut offset_val = self.offset.lock().unwrap();
+                *offset_val += 1;
+                row.offset = *offset_val;
+                row.offset
+            };
+
+            // Atomic store — no write lock needed.
+            wm.send_offset.store(offset, Ordering::Relaxed);
             break;
-        }
-
-        row.source = self.id.clone();
-        row.barrier_ref = {
-            let br = self.barrier_ref.lock().unwrap();
-            *br
-        };
-        let offset = {
-            let mut offset_val = self.offset.lock().unwrap();
-            *offset_val += 1;
-            row.offset = *offset_val;
-            row.offset
-        };
-
-        {
-            let mut wm = self.watermark.write().await;
-            wm.send_offset = offset;
         }
         match self.sender.send(row) {
             Ok(s) => {}

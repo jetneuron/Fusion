@@ -13,6 +13,7 @@ use log::{debug, error, trace, warn};
 use mlua::Function;
 use std::collections::{HashMap, HashSet};
 use std::panic;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, Mutex};
@@ -29,7 +30,7 @@ pub struct PhysicalTask {
     /// states manager
     pub(crate) states: GraphStates,
     /// Barrier tracking for fan-in nodes. None for non-fan-in nodes.
-    pub(crate) barrier_tracker: Option<Arc<Mutex<BarrierTracker>>>,
+    pub(crate) barrier_tracker: Option<Arc<parking_lot::Mutex<BarrierTracker>>>,
 }
 
 /// Tracks per-offset barrier completion for fan-in nodes.
@@ -92,7 +93,7 @@ impl PhysicalTask {
         &mut self,
         expected_sources: HashSet<String>,
     ) {
-        self.barrier_tracker = Some(Arc::new(Mutex::new(BarrierTracker {
+        self.barrier_tracker = Some(Arc::new(parking_lot::Mutex::new(BarrierTracker {
             expected_sources,
             groups: HashMap::new(),
         })));
@@ -179,14 +180,17 @@ impl PhysicalTask {
         let cloned_logical = (&self.logical).clone();
         let states = self.states.clone();
         tokio::task::spawn(async move {
-            let ctx = {
+            let (unit_id, ctx) = {
                 let self_tc = self_cloned.lock().await;
                 let watermark = self_tc.get_watermark();
-
+                let unit_id = self_tc.get_unit_id();
                 let self_unit = self_tc.unit.clone().expect("Failed to get unit");
                 let self_sender = (&self_tc.channel.internal_channel.0).clone();
-                TaskContext::new(self_unit, self_sender, watermark, states)
+                (unit_id, TaskContext::new(self_unit, self_sender, watermark, states))
             };
+
+            #[cfg(feature = "trace-physical")]
+            let src_clock = tokio::time::Instant::now();
 
             let self_logical = cloned_logical.lock().await;
             let context_ptr = Box::into_raw(Box::new(ctx));
@@ -200,6 +204,18 @@ impl PhysicalTask {
                     return Err(anyhow::anyhow!("fail to launch: {error}"));
                 }
             };
+
+            #[cfg(feature = "trace-physical")]
+            {
+                let wm = self_cloned.lock().await.get_watermark();
+                let wm_read = wm.read().await;
+                let sent = wm_read.send_offset.load(Ordering::Relaxed);
+                let elapsed = src_clock.elapsed();
+                trace!(
+                    "[source:{unit_id}] finished: {sent} rows in {elapsed:.2?} ({:.0} rows/ms)",
+                    sent as f64 / elapsed.as_millis().max(1) as f64
+                );
+            }
             Ok(())
         })
     }
@@ -237,8 +253,11 @@ impl PhysicalTask {
                 match receive_from_target.recv().await {
                     Ok(row) => {
                         if row.is_watermark() {
-                            let mut wm = watermark.write().await;
-                            wm.recv_offset = row.offset.max(wm.recv_offset);
+                            let wm = watermark.read().await;
+                            let prev = wm.recv_offset.load(Ordering::Relaxed);
+                            if row.offset > prev {
+                                wm.recv_offset.store(row.offset, Ordering::Relaxed);
+                            }
                         } else if row.is_eof() {
                             #[cfg(feature = "trace-physical")]
                             trace!(
@@ -302,6 +321,23 @@ impl PhysicalTask {
             // create filter if edge configure contain `condition` node.
             let edge_filter_fn = Self::init_edge_filter(edge_condition, states).await;
             let mut started = false;
+            // Batch watermark acknowledgements — sending one per row
+            // saturates the feedback broadcast channel (capacity 1024).
+            let mut wm_counter: u32 = 0;
+            const WM_BATCH: u32 = 16;
+
+            // Trace: per-edge channel timing.
+            #[cfg(feature = "trace-physical")]
+            let (mut fwd_clock, mut fwd_row_count): (Option<tokio::time::Instant>, u64) =
+                (None, 0);
+
+            // Pre-compute whether the target uses barrier tracking (fan-in).
+            // When disabled, we skip the per-row target lock for the barrier
+            // check — avoiding double-locking target_cloned for every row.
+            let (target_has_barrier, target_logical) = {
+                let tp = target_cloned.lock().await;
+                (tp.barrier_tracker.is_some(), tp.logical.clone())
+            };
 
             loop {
                 match receiver.1.recv().await {
@@ -335,13 +371,14 @@ impl PhysicalTask {
                             if is_fan_in {
                                 let target_physical = target_cloned.lock().await;
                                 let tracker = target_physical.barrier_tracker.as_ref().unwrap();
-                                let mut t = tracker.lock().await;
+                                let mut t = tracker.lock();
                                 let expected = t.expected_sources.len();
                                 let group = t.groups.entry(barrier_offset).or_default();
                                 group.barriers_received.insert(barrier_source);
 
-                                if group.barriers_received.len() == expected {
-                                    // All barriers received — flush buffered rows.
+                                let should_flush =
+                                    group.barriers_received.len() == expected;
+                                if should_flush {
                                     let buffered =
                                         std::mem::take(&mut group.buffered_rows);
                                     t.groups.remove(&barrier_offset);
@@ -366,8 +403,9 @@ impl PhysicalTask {
                                             barrier_offset,
                                         ))
                                         .ok();
+                                } else {
+                                    drop(t); // not yet complete — drop guard
                                 }
-                                // else: not yet complete — don't forward yet.
                             } else {
                                 // Non-fan-in node: forward barrier downstream unchanged.
                                 data_sender
@@ -393,6 +431,8 @@ impl PhysicalTask {
                             if finished {
                                 let cloned = row.clone();
                                 {
+                                    #[cfg(feature = "trace-physical")]
+                                    let eof_clock = tokio::time::Instant::now();
                                     let target_physical_task = target_cloned.lock().await;
                                     match target_physical_task.on_eof(row, &context).await {
                                         Ok(_) => {}
@@ -403,6 +443,11 @@ impl PhysicalTask {
                                             );
                                         }
                                     };
+                                    #[cfg(feature = "trace-physical")]
+                                    trace!(
+                                        "[node:{target_id}] on_eof finished in {:.2?}",
+                                        eof_clock.elapsed()
+                                    );
                                 }
 
                                 context.send(cloned).await;
@@ -412,44 +457,96 @@ impl PhysicalTask {
                             debug!(
                                 "task [{self_id}] received EOF from [{eof_source}], task finished NORMAL"
                             );
+                            #[cfg(feature = "trace-physical")]
+                            {
+                                let elapsed = fwd_clock
+                                    .map(|c| c.elapsed())
+                                    .unwrap_or_default();
+                                trace!(
+                                    "[chan:{self_id}→{target_id}] done: {fwd_row_count} rows in {elapsed:.2?} ({:.1} rows/ms)",
+                                    fwd_row_count as f64 / elapsed.as_millis().max(1) as f64
+                                );
+                            }
                             break;
                         }
 
                         // ── Data row ──
+                        #[cfg(feature = "trace-physical")]
+                        {
+                            if fwd_clock.is_none() {
+                                fwd_clock = Some(tokio::time::Instant::now());
+                            }
+                            fwd_row_count += 1;
+                        }
                         let recv_offset = row.offset;
                         let recv_barrier_ref = row.barrier_ref;
-
-                        // Check fan-in buffering on target.
-                        {
-                            let target_physical = target_cloned.lock().await;
-                            if let Some(tracker) = &target_physical.barrier_tracker {
-                                let mut t = tracker.lock().await;
-                                let expected = t.expected_sources.len();
-                                let group = t.groups.entry(recv_barrier_ref).or_default();
-                                // Still waiting for barriers on this group — buffer.
-                                if group.barriers_received.len() < expected {
-                                    group.buffered_rows.push(row);
-                                    continue;
-                                }
-                            }
-                        }
-
-                        // Propagate barrier_ref so downstream nodes can
-                        // group rows correctly. Source nodes leave it at 0,
-                        // so use offset as the group key for the first level.
                         let group_key = if recv_barrier_ref > 0 {
                             recv_barrier_ref
                         } else {
                             recv_offset
                         };
+
+                        // Check fan-in buffering on target — only lock
+                        // target_cloned when barrier tracking is active.
+                        if target_has_barrier {
+                            let target_physical = target_cloned.lock().await;
+                            if let Some(tracker) = &target_physical.barrier_tracker {
+                                let mut t = tracker.lock();
+                                let expected = t.expected_sources.len();
+                                let group =
+                                    t.groups.entry(recv_barrier_ref).or_default();
+                                // Buffer the data row.
+                                group.buffered_rows.push(row);
+                                // Direct signal: this source is done for this
+                                // barrier_ref. This replaces the channel-based
+                                // barrier injection which went to the wrong
+                                // channel (target data instead of source data).
+                                group.barriers_received.insert(self_id.clone());
+
+                                let should_flush =
+                                    group.barriers_received.len() == expected;
+                                if should_flush {
+                                    let buffered =
+                                        std::mem::take(&mut group.buffered_rows);
+                                    t.groups.remove(&recv_barrier_ref);
+                                    drop(t);
+                                    drop(target_physical);
+
+                                    for data_row in buffered {
+                                        context.sender.set_barrier_ref(group_key);
+                                        target_cloned
+                                            .lock()
+                                            .await
+                                            .compute(data_row, context.clone())
+                                            .await
+                                            .expect("fail to compute fan-in flush");
+                                    }
+                                    internal_sender
+                                        .send(Row::watermark(self_id.clone(), group_key))
+                                        .ok();
+                                    data_sender
+                                        .send(Row::barrier(
+                                            target_id.clone(),
+                                            group_key,
+                                        ))
+                                        .ok();
+                                } else {
+                                    drop(t); // still waiting — drop guard
+                                }
+                                continue;
+                            }
+                        }
+
+                        // Propagate barrier_ref so emitted rows carry it.
                         context.sender.set_barrier_ref(group_key);
 
                         if edge_filter_fn.is_none() {
-                            let target_physical_task = target_cloned.lock().await;
-                            target_physical_task
-                                .compute(row, context.clone())
-                                .await
-                                .expect("fail to compute");
+                            let logical = target_logical.lock().await;
+                            let context_ptr = Box::into_raw(Box::new(context.clone()));
+                            let row_ptr = Box::into_raw(Box::new(row));
+                            logical
+                                .internal_compute(row_ptr, context_ptr)?
+                                .await?;
                         } else {
                             let filter = edge_filter_fn.as_ref().unwrap();
                             let matched = {
@@ -460,28 +557,38 @@ impl PhysicalTask {
                             };
 
                             if matched {
-                                let target_physical_task = target_cloned.lock().await;
-                                target_physical_task
-                                    .compute(row, context.clone())
-                                    .await
-                                    .expect("fail to compute");
+                                let logical = target_logical.lock().await;
+                                let context_ptr = Box::into_raw(Box::new(context.clone()));
+                                let row_ptr = Box::into_raw(Box::new(row));
+                                logical
+                                    .internal_compute(row_ptr, context_ptr)?
+                                    .await?;
                             }
                         }
 
                         // Inject barrier after compute completes for this upstream row.
-                        data_sender
-                            .send(Row::barrier(target_id.clone(), group_key))
-                            .ok();
+                        // Skip when barrier tracking is disabled — barriers are
+                        // only needed for fan-in synchronization.
+                        if target_has_barrier {
+                            data_sender
+                                .send(Row::barrier(target_id.clone(), group_key))
+                                .ok();
+                        }
 
-                        internal_sender
-                            .send(Row::watermark(self_id.clone(), recv_offset))
-                            .unwrap();
+                        // Batch watermark acknowledgements — one per row
+                        // would saturate the feedback broadcast channel.
+                        wm_counter += 1;
+                        if wm_counter % WM_BATCH == 0 {
+                            internal_sender
+                                .send(Row::watermark(self_id.clone(), recv_offset))
+                                .ok();
+                        }
                     }
                     Err(broadcast::error::RecvError::Lagged(count)) => {
-                        println!("消费滞后：{}", count);
+                        log::warn!("channel lagged ({} messages dropped)", count);
                     }
                     Err(err) => {
-                        println!("recv error: {}", err);
+                        log::error!("channel recv error: {}", err);
                         break;
                     }
                 }

@@ -250,7 +250,7 @@ impl PhysicalGraph {
                 let watermark = {
                     // todo: estimate the watermark level
                     if outgoing_count > 0 {
-                        Watermark::new(100, 95, 85, incoming_count as i8)
+                        Watermark::new(1024, 896, 768, incoming_count as i8)
                     } else {
                         Watermark::new(
                             u64::MAX,
@@ -265,15 +265,14 @@ impl PhysicalGraph {
                 physical.update_unit(unit.clone()).await;
                 physical.init_script_env().await;
 
-                // Set up barrier tracking for fan-in nodes (incoming > 1).
-                let incoming_sources: HashSet<String> = pet_graph
-                    .neighbors_directed(index, petgraph::Direction::Incoming)
-                    .filter_map(|n| pet_graph.node_weight(n))
-                    .map(|u| u.get_id().clone())
-                    .collect();
-                if incoming_sources.len() > 1 {
-                    physical.set_barrier_tracking(incoming_sources);
-                }
+                // Barrier tracking is opt-in for now. It was designed for
+                // streaming fan-out→fan-in scenarios where per-row group
+                // synchronization is needed. For batch-accumulation patterns
+                // (stream_tables that buffer until EOF), it is unnecessary
+                // overhead — O(N) HashMap groups per row.
+                //
+                // Future: make barrier tracking configurable per-node via
+                // a YAML flag (e.g. `barrier_mode: per_row`).
 
                 physical_map.insert(index, Arc::new(Mutex::new(physical)));
             }
@@ -366,6 +365,11 @@ impl PhysicalGraph {
             "Execute graph had been finished. Elapsed {}ms",
             clock.elapsed().as_millis()
         );
+
+        // Cleanup: try to remove the graph data directory if all
+        // nodes have cleaned up their sub-directories.
+        fusion_unit_sdk::graph::utils::cleanup_graph_dir_if_empty(states.graph_id());
+
         Ok(())
     }
 }

@@ -131,3 +131,18 @@ async fn test_datafusion_sqlite_aggregation() -> anyhow::Result<()> {
     execute_with_datafusion("datafusion_sqlite_aggr.yaml").await
 }
 
+/// Two DebugInput sources → SqlUnitTask (stream JOIN) → DebugOutput.
+#[tokio::test]
+async fn test_datafusion_stream_join() -> anyhow::Result<()> {
+    execute_with_datafusion("datafusion_stream_join.yaml").await?;
+    Ok(())
+}
+
+/// Same as stream_join but with row_threshold=5 to trigger
+/// Parquet spill + directory registration at EOF.
+#[tokio::test]
+async fn test_datafusion_spill_join() -> anyhow::Result<()> {
+    execute_with_datafusion("datafusion_spill_join.yaml").await?;
+    Ok(())
+}
+

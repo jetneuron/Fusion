@@ -23,35 +23,51 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{Mutex, MutexGuard};
 
+/// Data generation mode for DebugInputUnitTask.
+#[derive(Default)]
+enum GenMode {
+    #[default]
+    Random,
+    Ascending,
+    Descending,
+}
+
+impl GenMode {
+    fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "ascending" | "asc" => Self::Ascending,
+            "descending" | "desc" => Self::Descending,
+            _ => Self::Random,
+        }
+    }
+}
+
 #[derive(Default, SrcLogicTask)]
 pub struct DebugInputUnitTask {
     meta: UnitMeta,
-    /// iterator times
     iter_times: i64,
-    /// generate column count
     column_count: i64,
-    /// emit data interval, millis
     interval: u64,
+    /// Data generation mode: random | ascending | descending.
+    gen_mode: GenMode,
 }
 
 impl InitUnit for DebugInputUnitTask {
     fn init(&mut self, unit: ComputingUnit) -> UnitResult<()> {
         let conf = unit.get_config();
 
-        // default value
         self.iter_times = 3i64;
         self.column_count = 2i64;
         self.interval = 0u64;
 
         conf.map(|c| {
-            // read `times` definition from config, default is 3.
-            self.iter_times = c["times"].as_i64().unwrap_or_else(|| self.iter_times);
-            // read `column_count` definition from config, default is 2.
-            self.column_count = c["column_count"]
-                .as_i64()
-                .unwrap_or_else(|| self.column_count);
-            // read `interval` definition from config, default is 0, means emit data immediately.
-            self.interval = c["interval"].as_u64().unwrap_or_else(|| self.interval);
+            self.iter_times = c["times"].as_i64().unwrap_or(self.iter_times);
+            self.column_count = c["column_count"].as_i64().unwrap_or(self.column_count);
+            self.interval = c["interval"].as_u64().unwrap_or(self.interval);
+            self.gen_mode = c["gen_mode"]
+                .as_str()
+                .map(GenMode::from_str)
+                .unwrap_or_default();
         });
         Ok(())
     }
@@ -62,28 +78,31 @@ impl SourceUnit for DebugInputUnitTask {
         &self,
         ctx: Arc<TaskContext>,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send> {
-        let id = Option::from(&ctx.unit)
-            .map(|u| u.get_id().clone())
-            .unwrap_or(String::default());
-
         let iter_times = self.iter_times;
         let column_count = self.column_count;
         let interval_millis = self.interval;
+        let gen_mode = match self.gen_mode {
+            GenMode::Random => 0,
+            GenMode::Ascending => 1,
+            GenMode::Descending => 2,
+        };
 
         Ok(async move {
-            for _row_idx in 0..iter_times {
+            for row_idx in 0..iter_times {
                 let mut row = Row::new();
-
                 for col_idx in 0..column_count {
                     let mut c = Column::new();
                     c.index = col_idx as u32;
                     c.field = format!("c{}", col_idx);
-                    let mut rng = rand::thread_rng();
-                    c.i32_val = rng.gen_range(10000..99999);
+                    let val: i32 = match gen_mode {
+                        1 => (row_idx + 1) as i32 * ((col_idx + 1) as i32 * 1000),
+                        2 => (iter_times - row_idx) as i32 * ((col_idx + 1) as i32 * 1000),
+                        _ => rand::thread_rng().gen_range(10000..99999),
+                    };
+                    c.i32_val = val;
                     c.dt = EnumOrUnknown::from(DataType::i32);
                     row.columns.push(c);
                 }
-
                 ctx.send(row).await;
                 if interval_millis > 0 {
                     tokio::time::sleep(Duration::from_millis(interval_millis)).await;

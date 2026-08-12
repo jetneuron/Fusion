@@ -116,7 +116,8 @@ impl TaskChannel for LocalTaskChannel {
 
 impl LocalTaskChannel {
     pub fn new() -> Self {
-        let buffer_size: usize = 128;
+        // Buffer matches watermark max.
+        let buffer_size: usize = 1024;
         let feedback_channel_buffer_size = buffer_size;
         LocalTaskChannel {
             channel_id: None,
