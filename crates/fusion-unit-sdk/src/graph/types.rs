@@ -5,6 +5,7 @@ use crate::runtime::UnitResult;
 use log::{debug, warn};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
+use futures::future;
 use std::future::Future;
 use std::ops::Index;
 use std::pin::Pin;
@@ -346,12 +347,16 @@ impl BackpressureSender {
         if self.senders.is_empty() {
             return; // sink node — no downstream channels
         }
-        let last = self.senders.len() - 1;
-        for (i, tx) in self.senders.iter().enumerate() {
-            let payload = if i == last { row.clone() } else { row.clone() };
-            if tx.send(payload).await.is_err() {
-                // downstream closed — ignore
-            }
+        // Fan-out to all downstream channels in parallel — a slow
+        // consumer does not block fast ones.
+        let futures: Vec<_> = self
+            .senders
+            .iter()
+            .map(|tx| tx.send(row.clone()))
+            .collect();
+        for result in futures::future::join_all(futures).await {
+            // downstream closed — ignore
+            let _ = result;
         }
     }
 }
