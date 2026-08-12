@@ -279,7 +279,7 @@ impl PhysicalTask {
             let st = states.clone();
             let lua = worker_luas.get(i).cloned();
             let handle = tokio::task::spawn(async move {
-                Self::worker_loop(worker_rx, &tgt, st, lua).await
+                Self::worker_loop(worker_rx, &tgt, st, lua, i).await
             });
             worker_handles.push(handle);
         }
@@ -537,6 +537,7 @@ impl PhysicalTask {
         target_cloned: &Arc<Mutex<PhysicalTask>>,
         states: GraphStates,
         worker_lua: Option<Arc<Mutex<mlua::Lua>>>,
+        worker_id: usize,
     ) -> anyhow::Result<()> {
         let (context, target_logical) = {
             let target_physical = target_cloned.lock().await;
@@ -578,7 +579,7 @@ impl PhysicalTask {
         {
             let elapsed = fwd_clock.map(|c| c.elapsed()).unwrap_or_default();
             trace!(
-                "[worker] done: {fwd_row_count} rows in {elapsed:.2?}",
+                "[worker#{worker_id}] done: {fwd_row_count} rows in {elapsed:.2?}",
             );
         }
         Ok(())
