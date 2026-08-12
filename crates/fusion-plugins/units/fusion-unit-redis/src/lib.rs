@@ -285,10 +285,20 @@ impl RedisUnitTask {
 
         // Inject `this` userdata if not already present.
         {
-            let lua_ref = states.state::<GraphLua>().map_err(|e| {
-                fusion_unit_sdk::runtime::UnitError::unknown(format!("GraphLua not found: {e}"))
-            })?;
-            let lua = lua_ref.0.lock().await;
+            // Per-worker Lua VM (parallelism > 1) or global GraphLua.
+            let lua_arc: Arc<tokio::sync::Mutex<mlua::Lua>> = match ctx.worker_lua.clone() {
+                Some(lua) => lua,
+                None => states
+                    .state::<GraphLua>()
+                    .map_err(|e| {
+                        fusion_unit_sdk::runtime::UnitError::unknown(format!(
+                            "GraphLua not found: {e}"
+                        ))
+                    })?
+                    .0
+                    .clone(),
+            };
+            let lua = lua_arc.lock().await;
             let globals = lua.globals();
             let scope_table: mlua::Table = globals.get(task_id.as_str()).map_err(|_| {
                 fusion_unit_sdk::runtime::UnitError::unknown(format!(
@@ -304,8 +314,13 @@ impl RedisUnitTask {
             )?;
         }
 
-        let scripter = scripter.lock().await;
-        scripter.row_eval(&task_id, states.clone(), ctx, row).await
+        // Take the eval future under the lock, then drop the guard
+        // before awaiting — parallel workers don't serialize here.
+        let eval_fut = {
+            let scripter = scripter.lock().await;
+            scripter.row_eval(&task_id, states.clone(), ctx, row)
+        };
+        eval_fut.await
     }
 
     /// Execute with per-row Tera rendering (map mode only).
@@ -319,9 +334,19 @@ impl RedisUnitTask {
         use fusion_streaming::runtime::core::LuaContext;
         let task_id = self.meta.get_id();
 
-        let lua_state = states.state::<GraphLua>().map_err(|e| {
-            fusion_unit_sdk::runtime::UnitError::unknown(format!("GraphLua not found: {e}"))
-        })?;
+        // Per-worker Lua VM (parallelism > 1) or global GraphLua.
+        let lua_arc: Arc<tokio::sync::Mutex<mlua::Lua>> = match ctx.worker_lua.clone() {
+            Some(lua) => lua,
+            None => states
+                .state::<GraphLua>()
+                .map_err(|e| {
+                    fusion_unit_sdk::runtime::UnitError::unknown(format!(
+                        "GraphLua not found: {e}"
+                    ))
+                })?
+                .0
+                .clone(),
+        };
 
         // Render Tera with row column values.
         let mut tera_ctx = tera::Context::new();
@@ -348,7 +373,7 @@ impl RedisUnitTask {
         drop(tera);
 
         // Execute as raw Lua chunk.
-        let lua = lua_state.0.lock().await;
+        let lua = lua_arc.lock().await;
 
         // Build data table from row columns.
         let data = lua.create_table().map_err(|e| {

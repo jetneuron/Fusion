@@ -21,7 +21,7 @@ pub trait LogicalTaskMeta {
 ///
 pub trait LogicalTask: LogicalTaskMeta {
     /// create logical task by provided computing unit configuration.
-    fn create(unit: ComputingUnit) -> UnitResult<Box<dyn LogicalTask + Send>>
+    fn create(unit: ComputingUnit) -> UnitResult<Box<dyn LogicalTask + Send + Sync>>
     where
         Self: Sized;
 

@@ -26,7 +26,7 @@ lazy_static::lazy_static! {
 
 pub struct TypeRegistry {
     pub registry:
-        Mutex<HashMap<String, fn(unit: ComputingUnit) -> UnitResult<Box<dyn LogicalTask + Send>>>>,
+        Mutex<HashMap<String, fn(unit: ComputingUnit) -> UnitResult<Box<dyn LogicalTask + Send + Sync>>>>,
 }
 
 pub struct ScripterRegistry {
@@ -45,7 +45,7 @@ impl TypeRegistry {
         registry.insert(name.to_string(), |unit| T::create(unit));
     }
 
-    pub fn create(&self, unit: ComputingUnit) -> UnitResult<Box<dyn LogicalTask + Send>> {
+    pub fn create(&self, unit: ComputingUnit) -> UnitResult<Box<dyn LogicalTask + Send + Sync>> {
         let unit_type_name = unit.get_type();
         let registry = self.registry.lock().unwrap();
         let factory = registry.get(unit_type_name);

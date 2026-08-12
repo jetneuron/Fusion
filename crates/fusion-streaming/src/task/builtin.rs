@@ -213,10 +213,15 @@ impl MapUnit for MapUnitTask {
                 .scripter
                 .as_ref()
                 .ok_or(UnitError::Unknown(String::from("Scripter not initialized")))?;
-            let scripter = scripter.lock().await;
             let states = ctx.states.clone();
             let id = self.meta.get_id();
-            scripter.row_eval(&id, states, ctx, row).await?;
+            // Take the eval future under the lock, then drop the guard
+            // before awaiting — parallel workers don't serialize here.
+            let eval_fut = {
+                let scripter = scripter.lock().await;
+                scripter.row_eval(&id, states, ctx, row)
+            };
+            eval_fut.await?;
             Ok(())
         }))
     }

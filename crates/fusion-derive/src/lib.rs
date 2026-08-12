@@ -141,7 +141,7 @@ fn impl_logical_task_trait(ast: &syn::DeriveInput, tp: i32) -> TokenStream {
 
         impl fusion_unit_sdk::runtime::logical::LogicalTask for #struct_name {
 
-            fn create(unit: fusion_unit_sdk::graph::types::ComputingUnit) -> fusion_unit_sdk::runtime::UnitResult<Box<dyn fusion_unit_sdk::runtime::logical::LogicalTask + ::core::marker::Send>>
+            fn create(unit: fusion_unit_sdk::graph::types::ComputingUnit) -> fusion_unit_sdk::runtime::UnitResult<Box<dyn fusion_unit_sdk::runtime::logical::LogicalTask + ::core::marker::Send + ::core::marker::Sync>>
             where
                 Self: Sized
             {

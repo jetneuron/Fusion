@@ -31,7 +31,7 @@ impl UnitManifest {
 pub trait GraphUnitPlugin {
     fn register_units(&self) -> UnitManifest;
 
-    fn create(&self, unit: ComputingUnit) -> UnitResult<Box<dyn LogicalTask + Send>> {
+    fn create(&self, unit: ComputingUnit) -> UnitResult<Box<dyn LogicalTask + Send + Sync>> {
         let unit_unique_id = unit.get_id().clone();
         let mut logical = GLOBAL_REGISTRY.create(unit)?;
         logical.set_id(unit_unique_id);

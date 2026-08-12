@@ -81,9 +81,14 @@ impl Scripter for LuaScript {
         let arc_row = Arc::new(Mutex::new(row));
         // Scope name matches what init_script_env() / shutdown() use.
         let scope_name = task_id.to_string();
+        // Per-worker Lua VM (parallelism > 1) or global GraphLua.
+        let worker_lua = ctx.worker_lua.clone();
         Box::pin(async move {
-            let lua_ref = inner_states.state::<GraphLua>()?;
-            let lua = lua_ref.0.lock().await;
+            let lua_arc: Arc<tokio::sync::Mutex<Lua>> = match worker_lua {
+                Some(lua) => lua,
+                None => inner_states.state::<GraphLua>()?.0.clone(),
+            };
+            let lua = lua_arc.lock().await;
             let globals = lua.globals();
 
             let scope_table: Table = globals

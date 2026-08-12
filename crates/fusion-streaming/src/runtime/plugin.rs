@@ -105,7 +105,7 @@ impl PluginManager {
     pub async fn create_logical_task(
         &self,
         unit: ComputingUnit,
-    ) -> UnitResult<Box<dyn LogicalTask + Send>> {
+    ) -> UnitResult<Box<dyn LogicalTask + Send + Sync>> {
         let version = unit.get_version();
         let key = format!("{}#{}", unit.get_type(), version);
 

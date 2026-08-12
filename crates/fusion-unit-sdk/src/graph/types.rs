@@ -274,6 +274,8 @@ pub struct TaskContext {
     pub unit: ComputingUnit,
     pub sender: BackpressureSender,
     pub states: GraphStates,
+    /// Per-worker Lua VM (parallelism > 1). None = use global GraphLua.
+    pub worker_lua: Option<Arc<tokio::sync::Mutex<mlua::Lua>>>,
 }
 
 pub struct Watermark {
@@ -372,7 +374,15 @@ impl TaskContext {
             unit,
             sender: BackpressureSender::new(id, senders),
             states,
+            worker_lua: None,
         }
+    }
+
+    /// Attach a per-worker Lua VM (parallelism > 1). Scripts executed
+    /// through this context run on the worker's own VM.
+    pub fn with_worker_lua(mut self, lua: Arc<tokio::sync::Mutex<mlua::Lua>>) -> Self {
+        self.worker_lua = Some(lua);
+        self
     }
 
     pub async fn send(&self, row: Row) {

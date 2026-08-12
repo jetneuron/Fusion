@@ -248,8 +248,20 @@ impl PhysicalGraph {
                 };
 
                 let upstream_remain = incoming_count as i8;
-                let mut physical: PhysicalTask =
-                    PhysicalTask::new_with_watermark(logical_task, upstream_remain, states.clone());
+                // Node parallelism — optional config, default 1 (serial).
+                let parallelism = unit
+                    .get_config()
+                    .as_ref()
+                    .and_then(|c| c.get("parallelism").cloned())
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(1)
+                    .max(1) as usize;
+                let mut physical: PhysicalTask = PhysicalTask::new_with_watermark(
+                    logical_task,
+                    upstream_remain,
+                    states.clone(),
+                    parallelism,
+                );
                 physical.update_unit(unit.clone()).await;
                 physical.init_script_env().await;
 

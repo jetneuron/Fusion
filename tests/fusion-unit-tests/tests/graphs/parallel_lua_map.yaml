@@ -1,0 +1,42 @@
+name: parallel_lua_map_test
+
+units:
+  - id: src
+    name: source_node
+    type: DebugInputUnitTask
+    version: builtin
+    config:
+      times: 100
+      column_count: 2
+      interval: 0
+      gen_mode: ascending
+
+  - id: map
+    name: lua_map_node
+    type: MapUnitTask
+    version: builtin
+    config:
+      parallelism: 4
+      $script: |
+        local ctx, data, this = ...
+        local out = ctx:newRow()
+        out['c0'] = data['c0']
+        out['c1'] = data['c1']
+        out['doubled'] = data['c1'] * 2
+        ctx:send(out)
+      $script_type: Lua
+
+  - id: output
+    name: output_node
+    type: DebugOutputUnitTask
+    version: builtin
+    config:
+      show_report: true
+
+edges:
+  - id: e1
+    source: src
+    target: map
+  - id: e2
+    source: map
+    target: output

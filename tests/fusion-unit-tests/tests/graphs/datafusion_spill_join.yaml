@@ -28,6 +28,7 @@ units:
     config:
       datasource: datafusion
 #      row_threshold: 30000
+      parallelism: 4
       sql: "SELECT a.c0 as id, a.c1 as name, b.c0 as key, b.c1 as score FROM stream_a a JOIN stream_b b ON a.c0 = b.c0 and a.c0 > 79990000 ORDER BY a.c0"
       stream_tables:
         - name: stream_a
