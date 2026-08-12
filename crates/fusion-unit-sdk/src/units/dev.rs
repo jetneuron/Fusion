@@ -1,19 +1,12 @@
-use crate::graph::types::{ComputingUnit, TaskContext, Watermark};
+use crate::graph::types::{ComputingUnit, TaskContext};
 use crate::proto::transfer::Row;
-use std::sync::Arc;
-use tokio::sync::broadcast::{Receiver, Sender};
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::mpsc;
 
-pub fn create_dev_context(unit: ComputingUnit) -> (TaskContext, Receiver<Row>) {
-    let channel = broadcast::channel(100);
-    let sender: Sender<Row> = channel.0;
-    let receiver = channel.1;
+pub fn create_dev_context(unit: ComputingUnit) -> (TaskContext, mpsc::Receiver<Row>) {
+    // Use a large buffer so plugin unit tests that produce many rows
+    // before draining don't deadlock (broadcast never blocked).
+    let (tx, rx) = mpsc::channel(100_000);
     let states = unit.get_runtime_states().unwrap();
-    let context = TaskContext::new(
-        unit,
-        sender,
-        Arc::new(RwLock::new(Watermark::new(20, 20, 20, 0))),
-        states,
-    );
-    (context, receiver)
+    let context = TaskContext::new(unit, vec![tx], states);
+    (context, rx)
 }

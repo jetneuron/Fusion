@@ -2,7 +2,7 @@ use crate::graph::core::{LogicalGraph, PetGraph};
 use crate::runtime::physical::PhysicalTask;
 use crate::runtime::plugin::PluginManager;
 use crate::runtime::scripts::{GraphLua, GraphTera};
-use fusion_unit_sdk::graph::types::{EdgeCondition, EdgeConfig, TaskContext, Watermark};
+use fusion_unit_sdk::graph::types::{EdgeCondition, EdgeConfig, TaskContext};
 use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
 use fusion_unit_sdk::runtime::state::GraphStates;
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
@@ -247,32 +247,11 @@ impl PhysicalGraph {
                     mgr.create_logical_task(cloned_unit).await?
                 };
 
-                let watermark = {
-                    // todo: estimate the watermark level
-                    if outgoing_count > 0 {
-                        Watermark::new(1024, 896, 768, incoming_count as i8)
-                    } else {
-                        Watermark::new(
-                            u64::MAX,
-                            u64::MAX - 100,
-                            u64::MAX - 200,
-                            incoming_count as i8,
-                        )
-                    }
-                };
+                let upstream_remain = incoming_count as i8;
                 let mut physical: PhysicalTask =
-                    PhysicalTask::new_with_watermark(logical_task, watermark, states.clone());
+                    PhysicalTask::new_with_watermark(logical_task, upstream_remain, states.clone());
                 physical.update_unit(unit.clone()).await;
                 physical.init_script_env().await;
-
-                // Barrier tracking is opt-in for now. It was designed for
-                // streaming fan-out→fan-in scenarios where per-row group
-                // synchronization is needed. For batch-accumulation patterns
-                // (stream_tables that buffer until EOF), it is unnecessary
-                // overhead — O(N) HashMap groups per row.
-                //
-                // Future: make barrier tracking configurable per-node via
-                // a YAML flag (e.g. `barrier_mode: per_row`).
 
                 physical_map.insert(index, Arc::new(Mutex::new(physical)));
             }
@@ -317,7 +296,7 @@ impl PhysicalGraph {
 
                     let curr_physical = current_node.lock().await;
 
-                    let handle = curr_physical.link(target_physical, edge_condition);
+                    let handle = curr_physical.link(target_physical, edge_condition).await;
                     join_handles.extend(handle);
                     connected_map.insert((node, neighbor));
                 }

@@ -73,7 +73,7 @@ async fn ssh_basic_test() {
     async move {
         let mut m = context.1;
         let mut idx = 0;
-        while let Ok(row) = m.recv().await {
+        while let Some(row) = m.recv().await {
             if idx == 0 {
                 row.display_column_names();
             }

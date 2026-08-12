@@ -8,10 +8,8 @@ use serde_json::Value;
 use std::future::Future;
 use std::ops::Index;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::sync::broadcast::Sender;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 
 pub type UnitIdx = String;
 
@@ -127,6 +125,10 @@ impl ComputingUnit {
     pub fn update_neighbors(&mut self, outgoing: usize, incoming: usize) {
         self.outgoing = outgoing;
         self.incoming = incoming;
+    }
+
+    pub fn get_outgoing(&self) -> usize {
+        self.outgoing
     }
 
     pub fn with_config(mut self, conf: UnitConfig) -> Self {
@@ -274,53 +276,16 @@ pub struct TaskContext {
 }
 
 pub struct Watermark {
-    pub send_offset: AtomicU64,
-    pub recv_offset: AtomicU64,
-    pub high: u64,
-    pub low: u64,
-    pub max: u64,
     pub ultimate: bool,
     pub upstream_remain: i8,
 }
 
 impl Watermark {
-    pub fn new(max: u64, high: u64, low: u64, upstream_remain: i8) -> Self {
+    pub fn new(upstream_remain: i8) -> Self {
         Self {
-            send_offset: AtomicU64::new(0),
-            recv_offset: AtomicU64::new(0),
-            high,
-            low,
-            max,
-            ultimate: max == u64::MAX,
+            ultimate: false,
             upstream_remain,
         }
-    }
-
-    fn should_slow_down(&self) -> bool {
-        let send = self.send_offset.load(Ordering::Relaxed);
-        let recv = self.recv_offset.load(Ordering::Relaxed);
-        if recv >= send {
-            return false;
-        }
-        send - recv >= self.high
-    }
-
-    fn should_pause(&self) -> bool {
-        let send = self.send_offset.load(Ordering::Relaxed);
-        let recv = self.recv_offset.load(Ordering::Relaxed);
-        if recv >= send {
-            return false;
-        }
-        send - recv >= self.max
-    }
-
-    fn should_resume(&self) -> bool {
-        let send = self.send_offset.load(Ordering::Relaxed);
-        let recv = self.recv_offset.load(Ordering::Relaxed);
-        if recv >= send {
-            return true;
-        }
-        send - recv <= self.low
     }
 
     pub fn is_ultimate(&self) -> bool {
@@ -331,20 +296,18 @@ impl Watermark {
 #[derive(Clone)]
 pub struct BackpressureSender {
     id: String,
-    sender: Box<Sender<Row>>,
+    senders: Vec<tokio::sync::mpsc::Sender<Row>>,
     offset: Arc<std::sync::Mutex<u64>>,
-    watermark: Arc<RwLock<Watermark>>,
     /// Current barrier_ref — set by engine before compute, applied to every emitted row.
     barrier_ref: Arc<std::sync::Mutex<u64>>,
 }
 
 impl BackpressureSender {
-    pub fn new(id: String, sender: Sender<Row>, watermark: Arc<RwLock<Watermark>>) -> Self {
+    pub fn new(id: String, senders: Vec<tokio::sync::mpsc::Sender<Row>>) -> Self {
         BackpressureSender {
             id,
-            sender: Box::new(sender),
+            senders,
             offset: Arc::new(std::sync::Mutex::new(0)),
-            watermark,
             barrier_ref: Arc::new(std::sync::Mutex::new(0)),
         }
     }
@@ -356,59 +319,53 @@ impl BackpressureSender {
         *br = r;
     }
 
-    /// send row data with backpressure.
-    pub async fn send(&self, mut row: Row) {
-        loop {
-            let wm = self.watermark.read().await;
-            if wm.should_pause() {
-                // Gap >= max — consumer is far behind, sleep to give it CPU time.
-                drop(wm);
-                tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
-                continue;
-            }
-            if wm.should_slow_down() {
-                // Gap >= high — consumer is falling behind, yield to let it run.
-                drop(wm);
-                tokio::task::yield_now().await;
-                continue;
-            }
+    /// Return the current row offset count (for trace logging).
+    pub fn sent_count(&self) -> u64 {
+        *self.offset.lock().unwrap()
+    }
 
+    /// send row data.
+    /// mpsc provides built-in backpressure: `tx.send().await` blocks when
+    /// the channel buffer is full. No watermark polling needed.
+    pub async fn send(&self, mut row: Row) {
+        // Stamp source/offset/barrier_ref. Skip for barrier/eof rows —
+        // barrier offsets must be preserved for fan-in group tracking.
+        if !row.is_barrier() && !row.is_eof() {
             row.source = self.id.clone();
             row.barrier_ref = {
                 let br = self.barrier_ref.lock().unwrap();
                 *br
             };
-            let offset = {
+            row.offset = {
                 let mut offset_val = self.offset.lock().unwrap();
                 *offset_val += 1;
-                row.offset = *offset_val;
-                row.offset
+                *offset_val
             };
-
-            // Atomic store — no write lock needed.
-            wm.send_offset.store(offset, Ordering::Relaxed);
-            break;
         }
-        match self.sender.send(row) {
-            Ok(s) => {}
-            Err(_) => {
-                println!("Watermark sender dropped");
+
+        if self.senders.is_empty() {
+            return; // sink node — no downstream channels
+        }
+        let last = self.senders.len() - 1;
+        for (i, tx) in self.senders.iter().enumerate() {
+            let payload = if i == last { row.clone() } else { row.clone() };
+            if tx.send(payload).await.is_err() {
+                // downstream closed — ignore
             }
-        };
+        }
     }
 }
 
 impl TaskContext {
     pub fn new(
         unit: ComputingUnit,
-        sender: Sender<Row>,
-        watermark: Arc<RwLock<Watermark>>,
+        senders: Vec<tokio::sync::mpsc::Sender<Row>>,
         states: GraphStates,
     ) -> Self {
         let id = unit.id.clone();
         TaskContext {
             unit,
-            sender: BackpressureSender::new(id, sender, watermark),
+            sender: BackpressureSender::new(id, senders),
             states,
         }
     }

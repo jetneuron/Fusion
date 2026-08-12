@@ -1,26 +1,30 @@
 use crate::network::channel::LocalTaskChannel;
-use fusion_unit_sdk::graph::types::{ComputingUnit, Watermark};
+use fusion_unit_sdk::graph::types::ComputingUnit;
+use std::sync::atomic::AtomicI8;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub struct TaskCore {
     pub(crate) channel: Box<LocalTaskChannel>,
     pub(crate) unit: Option<ComputingUnit>,
-    watermark: Arc<RwLock<Watermark>>,
+    /// Remaining upstream sources — decremented on each incoming EOF.
+    /// When it reaches ≤ 0, all upstreams are done and `on_eof` fires.
+    upstream_remain: Arc<AtomicI8>,
 }
 
 impl TaskCore {
-    pub(crate) fn new<T: Into<String>>(channel_id: T, watermark: Watermark) -> Self {
+    pub(crate) fn new<T: Into<String>>(channel_id: T, upstream_remain: i8) -> Self {
         let mut channel = LocalTaskChannel::new();
         channel.set_channel_id(channel_id);
         TaskCore {
             channel: Box::new(channel),
             unit: None,
-            watermark: Arc::new(RwLock::new(watermark)),
+            upstream_remain: Arc::new(AtomicI8::new(upstream_remain)),
         }
     }
 
     pub(crate) fn set_unit(&mut self, unit: ComputingUnit) {
+        let outgoing = unit.get_outgoing();
+        self.channel.prepare_outputs(outgoing);
         let id = unit.get_id().clone();
         self.unit = Some(unit);
         self.channel.set_channel_id(id);
@@ -36,8 +40,8 @@ impl TaskCore {
         cloned_unit.map_or_else(|| String::default(), |u| u.get_id().clone())
     }
 
-    pub fn get_watermark(&self) -> Arc<RwLock<Watermark>> {
-        Arc::clone(&self.watermark)
+    pub fn get_upstream_remain(&self) -> Arc<AtomicI8> {
+        Arc::clone(&self.upstream_remain)
     }
 }
 
@@ -46,7 +50,7 @@ impl Default for TaskCore {
         TaskCore {
             channel: Box::new(LocalTaskChannel::new()),
             unit: None,
-            watermark: Arc::new(RwLock::new(Watermark::new(80, 60, 20, 0))),
+            upstream_remain: Arc::new(AtomicI8::new(0)),
         }
     }
 }
@@ -55,58 +59,4 @@ pub trait UnitTask {
     fn new(unit: ComputingUnit) -> Self;
 
     fn get_core(&self) -> &TaskCore;
-
-    // /// We connect this task to target. Create channel and prepare watermark, internal channel.
-    // fn link<T>(&self, target: Arc<Mutex<T>>)
-    // where
-    //     T: UnitTask + MapUnit + Send + 'static,
-    // {
-    //     let core = self.get_core();
-    //     let this_channel = &core.channel;
-    //
-    //     let binding = target.lock().unwrap();
-    //     let target_core = binding.get_core();
-    //     let target_channel = &target_core.channel;
-    //
-    //     let target_cloned = Arc::clone(&target);
-    //     let target_receiver = this_channel.subscribe();
-    //
-    //     let x = &core.unit.clone();
-    //     let option = x.clone().unwrap();
-    //
-    //     // capture the receiver and process by implementation.
-    //     target_channel.capture_receiver(target_receiver, move |row, ctx| {
-    //         let target_task = target_cloned.lock().unwrap();
-    //
-    //         let target_core = target_task.get_core();
-    //         let target_channel = &target_core.channel;
-    //         let feedback = target_channel.internal_sender();
-    //
-    //         let is_eof = &row.is_eof();
-    //         if *is_eof {
-    //             target_task.on_eof(&ctx);
-    //             feedback.send(Row::eof()).unwrap();
-    //             return;
-    //         }
-    //
-    //         // report to sender which offset current is.
-    //         let curr_offset = row.offset;
-    //
-    //         // core process aspect
-    //         target_task.compute(row, &ctx);
-    //
-    //         feedback.send(Row::watermark(curr_offset)).unwrap();
-    //     });
-    //
-    //     let from_target = target_channel.internal_subscribe();
-    //     let watermark = core.get_watermark();
-    //     this_channel.listening_feedback(from_target, watermark);
-    // }
-    //
-    // fn collector(&self) -> BackpressureSender {
-    //     let core = self.get_core();
-    //     let ch = &core.channel;
-    //     let watermark = core.get_watermark();
-    //     BackpressureSender::new(ch.sender().clone(), watermark)
-    // }
 }
