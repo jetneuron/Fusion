@@ -146,3 +146,11 @@ async fn test_datafusion_spill_join() -> anyhow::Result<()> {
     Ok(())
 }
 
+
+/// Stream join with large row_threshold — pure in-memory provider
+/// (no Parquet spill).
+#[tokio::test]
+async fn test_datafusion_mem_join() -> anyhow::Result<()> {
+    execute_with_datafusion("datafusion_mem_join.yaml").await?;
+    Ok(())
+}

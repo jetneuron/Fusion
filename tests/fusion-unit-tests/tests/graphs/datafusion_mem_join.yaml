@@ -1,0 +1,54 @@
+name: datafusion_mem_join_test
+
+units:
+  - id: src-a
+    name: source_a
+    type: DebugInputUnitTask
+    version: builtin
+    config:
+      times: 3
+      column_count: 2
+      interval: 0
+      gen_mode: ascending
+
+  - id: src-b
+    name: source_b
+    type: DebugInputUnitTask
+    version: builtin
+    config:
+      times: 3
+      column_count: 2
+      interval: 0
+      gen_mode: ascending
+
+  - id: sql-join
+    name: sql_join_node
+    type: SqlUnitTask
+    version: unstable
+    config:
+      datasource: datafusion
+      sql: "SELECT a.c0 as id, a.c1 as name, b.c0 as key, b.c1 as score FROM stream_a a JOIN stream_b b ON a.c0 = b.c0 ORDER BY a.c0 desc"
+      row_threshold: 100000
+      stream_tables:
+        - name: stream_a
+          source: src-a
+        - name: stream_b
+          source: src-b
+
+  - id: output
+    name: output_node
+    type: DebugOutputUnitTask
+    version: builtin
+    config:
+      show_report: true
+
+edges:
+  - id: e1
+    source: src-a
+    target: sql-join
+  - id: e2
+    source: src-b
+    target: sql-join
+  - id: e3
+    source: sql-join
+    target: output
