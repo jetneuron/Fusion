@@ -168,6 +168,15 @@ impl InitUnit for SqlUnitTask {
             }
         }
 
+        // Map/sink roles receive upstream frames — they must declare
+        // stream_tables so incoming data is buffered and queried at EOF.
+        // Without them, compute() would re-run the SQL per frame.
+        if (unit.is_mapper() || unit.is_sink()) && self.stream_tables.is_empty() {
+            return Err(fusion_unit_sdk::runtime::UnitError::config_required(
+                "stream_tables (map/sink role requires stream tables)",
+            ));
+        }
+
         // Spill threshold — rows buffered in memory before spilling to
         // Parquet. `usize::MAX` = pure in-memory stream table.
         let row_threshold = conf
@@ -326,20 +335,23 @@ impl MapUnit for SqlUnitTask {
         'life0: 'async_trait,
         Self: 'async_trait,
     {
-        let has_streams = !self.stream_tables.is_empty();
         let source_idx = self.source_index.get(&frame.source).copied();
         let providers = self.stream_providers.clone();
 
         Ok(async move {
-            if !has_streams {
-                // Legacy path: no stream tables, execute immediately.
-                self.execute_query(ctx).await?;
-                return Ok(());
-            }
-
             let idx = match source_idx {
                 Some(i) => i,
-                None => return Ok(()), // unknown source, ignore
+                None => {
+                    // Config referenced an upstream that never sent data —
+                    // surface it instead of silently dropping frames.
+                    log::warn!(
+                        "SqlUnitTask [{}] received frame from unknown source `{}` (declared: {:?})",
+                        self.meta.get_id(),
+                        frame.source,
+                        self.source_index.keys().collect::<Vec<_>>()
+                    );
+                    return Ok(());
+                }
             };
 
             // Append to the per-source provider. Thread-safe — parallel
@@ -415,7 +427,19 @@ impl MapUnit for SqlUnitTask {
                 ctx.send(r).await;
             }
 
-            // 4. Cleanup node temp directory.
+            // 4. Deregister this node's tables so they don't leak into
+            // other graphs sharing the process-global session.
+            {
+                let session = df.ctx.lock().await;
+                for name in tables.iter().map(|t| t.name.as_str()) {
+                    let _ = session.deregister_table(name);
+                }
+                for name in stream_tables.iter().map(|st| st.name.as_str()) {
+                    let _ = session.deregister_table(name);
+                }
+            }
+
+            // 5. Cleanup node temp directory.
             if has_streams {
                 let _ = std::fs::remove_dir_all(&data_dir);
             }
