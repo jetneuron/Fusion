@@ -107,7 +107,7 @@ pub enum UnitError {
     ConfigFieldRequired(String),
     #[error("Unit IO error, cause by: {0}")]
     IOError(String),
-    #[error("Row format error: {0}")]
+    #[error("Frame format error: {0}")]
     InvalidateRowFormat(String),
     #[error("Panic occur in physical task: {0}")]
     PhysicalTaskErr(String),

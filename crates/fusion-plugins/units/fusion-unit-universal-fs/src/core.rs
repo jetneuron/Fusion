@@ -1,13 +1,13 @@
 use crate::error::IOError;
 use aladdin_common::uri_utils::UriParser;
 use anyhow::bail;
-use fusion_unit_sdk::proto::transfer::Row;
+use fusion_unit_sdk::proto::transfer::Frame;
 use serde_json::Value;
 
 pub type UniversalIOConfig = Value;
 
 pub trait UniversalIO: Send + Sync {
-    type Reader: Iterator<Item = Result<Row, IOError>>;
+    type Reader: Iterator<Item = Result<Frame, IOError>>;
 
     fn get_universal_config(&self) -> &UniversalIOConfig;
 
@@ -15,26 +15,26 @@ pub trait UniversalIO: Send + Sync {
 
     fn iter_rows(&self) -> anyhow::Result<Self::Reader, IOError>;
 
-    fn write_row(&self, row: Row) -> anyhow::Result<()>;
+    fn write_row(&self, frame: Frame) -> anyhow::Result<()>;
     fn close(&self) -> anyhow::Result<()>;
 }
 
 pub trait RowReader {
-    type Reader: Iterator<Item = Result<Row, IOError>>;
+    type Reader: Iterator<Item = Result<Frame, IOError>>;
     fn rows(&self) -> anyhow::Result<Self::Reader, IOError>;
 }
 
 pub trait RowWriter {
-    fn write(&self, row: Row) -> Result<(), IOError>;
+    fn write(&self, frame: Frame) -> Result<(), IOError>;
 }
 
 pub trait IntoUniversalIO {
-    type Reader: Iterator<Item = Result<Row, IOError>>;
+    type Reader: Iterator<Item = Result<Frame, IOError>>;
     fn into_universal_io(self) -> anyhow::Result<Box<dyn UniversalIO<Reader = Self::Reader>>>;
 }
 
 impl IntoUniversalIO for &str {
-    type Reader = Box<dyn Iterator<Item = Result<Row, IOError>>>;
+    type Reader = Box<dyn Iterator<Item = Result<Frame, IOError>>>;
 
     fn into_universal_io(self) -> anyhow::Result<Box<dyn UniversalIO<Reader = Self::Reader>>> {
         self.to_string().into_universal_io()
@@ -42,7 +42,7 @@ impl IntoUniversalIO for &str {
 }
 
 impl IntoUniversalIO for String {
-    type Reader = Box<dyn Iterator<Item = Result<Row, IOError>>>;
+    type Reader = Box<dyn Iterator<Item = Result<Frame, IOError>>>;
 
     fn into_universal_io(self) -> anyhow::Result<Box<dyn UniversalIO<Reader = Self::Reader>>> {
         match UriParser::parse_uri(&self) {
@@ -75,7 +75,7 @@ impl IntoUniversalIO for String {
 }
 
 impl IntoUniversalIO for (&str, UniversalIOConfig) {
-    type Reader = Box<dyn Iterator<Item = Result<Row, IOError>>>;
+    type Reader = Box<dyn Iterator<Item = Result<Frame, IOError>>>;
 
     fn into_universal_io(self) -> anyhow::Result<Box<dyn UniversalIO<Reader = Self::Reader>>> {
         (self.0.to_string(), self.1).into_universal_io()
@@ -83,7 +83,7 @@ impl IntoUniversalIO for (&str, UniversalIOConfig) {
 }
 
 impl IntoUniversalIO for (String, UniversalIOConfig) {
-    type Reader = Box<dyn Iterator<Item = Result<Row, IOError>>>;
+    type Reader = Box<dyn Iterator<Item = Result<Frame, IOError>>>;
 
     fn into_universal_io(self) -> anyhow::Result<Box<dyn UniversalIO<Reader = Self::Reader>>> {
         let path = self.0;

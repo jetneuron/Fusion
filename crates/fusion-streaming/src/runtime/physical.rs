@@ -1,9 +1,9 @@
-use crate::runtime::core::LuaRow;
+use crate::runtime::core::LuaFrame;
 use crate::runtime::scripts::{GraphLua, LuaScript};
 use crate::runtime::{EVENT_TYPE_EOF, EVENT_TYPE_START};
 use crate::task::types::{TaskCore, UnitTask};
 use fusion_unit_sdk::graph::types::{ComputingUnit, EdgeCondition, TaskContext};
-use fusion_unit_sdk::proto::transfer::Row;
+use fusion_unit_sdk::proto::transfer::Frame;
 use fusion_unit_sdk::runtime::logical::LogicalTask;
 use fusion_unit_sdk::runtime::state::GraphStates;
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
@@ -128,27 +128,27 @@ impl PhysicalTask {
     }
 
     /// on task END-of-FILE event
-    pub async fn on_eof(&self, row: Row, ctx: &TaskContext) -> UnitResult<()> {
+    pub async fn on_eof(&self, frame: Frame, ctx: &TaskContext) -> UnitResult<()> {
         let logical_task = &*self.logical;
-        logical_task.event(EVENT_TYPE_EOF, ctx, row, vec![]).await?;
+        logical_task.event(EVENT_TYPE_EOF, ctx, frame, vec![]).await?;
         self.shutdown().await
     }
 
     /// on task start event
-    pub async fn on_start(&self, row: Row, ctx: &TaskContext) -> UnitResult<()> {
+    pub async fn on_start(&self, frame: Frame, ctx: &TaskContext) -> UnitResult<()> {
         let logical_task = &*self.logical;
-        logical_task.event(EVENT_TYPE_START, ctx, row, vec![]).await
+        logical_task.event(EVENT_TYPE_START, ctx, frame, vec![]).await
     }
 
     /// on task computing
     ///
     /// ## Parameters
-    /// * `row` - data row
+    /// * `frame` - data frame
     /// * `ctx` - Context
-    pub async fn compute(&self, row: Row, ctx: TaskContext) -> anyhow::Result<()> {
+    pub async fn compute(&self, frame: Frame, ctx: TaskContext) -> anyhow::Result<()> {
         let logical_task = &*self.logical;
         let context_ptr = Box::into_raw(Box::new(ctx));
-        let row_ptr = Box::into_raw(Box::new(row));
+        let row_ptr = Box::into_raw(Box::new(frame));
         logical_task.internal_compute(row_ptr, context_ptr)?.await?;
         Ok(())
     }
@@ -236,7 +236,7 @@ impl PhysicalTask {
     fn target_handle_current_sent(
         &self,
         target: &Arc<Mutex<PhysicalTask>>,
-        mut rx: tokio::sync::mpsc::Receiver<Row>,
+        mut rx: tokio::sync::mpsc::Receiver<Frame>,
         edge_condition: Option<EdgeCondition>,
         parallelism: usize,
         worker_luas: Vec<Arc<Mutex<mlua::Lua>>>,
@@ -265,7 +265,7 @@ impl PhysicalTask {
         let mut worker_txs = Vec::with_capacity(parallelism);
         let mut worker_rxs = Vec::with_capacity(parallelism);
         for _ in 0..parallelism {
-            let (tx, rx) = tokio::sync::mpsc::channel::<Row>(64);
+            let (tx, rx) = tokio::sync::mpsc::channel::<Frame>(64);
             worker_txs.push(tx);
             worker_rxs.push(rx);
         }
@@ -309,7 +309,7 @@ impl PhysicalTask {
 
     /// Single-worker forwarding loop (parallelism == 1, existing behavior).
     async fn forward_loop(
-        mut rx: tokio::sync::mpsc::Receiver<Row>,
+        mut rx: tokio::sync::mpsc::Receiver<Frame>,
         self_cloned: &Arc<Mutex<TaskCore>>,
         target_cloned: &Arc<Mutex<PhysicalTask>>,
         states: GraphStates,
@@ -335,29 +335,29 @@ impl PhysicalTask {
         let mut started = false;
 
         #[cfg(feature = "trace-physical")]
-        let (mut fwd_clock, mut fwd_row_count): (Option<tokio::time::Instant>, u64) =
+        let (mut fwd_clock, mut fwd_frame_count): (Option<tokio::time::Instant>, u64) =
             (None, 0);
 
-        while let Some(mut row) = rx.recv().await {
+        while let Some(mut frame) = rx.recv().await {
             if !started {
                 Self::ensure_started(target_cloned, &context).await?;
                 started = true;
             }
 
             // ── Barrier ── (forwarded downstream as-is via context.send)
-            if row.is_barrier() {
-                context.send(row).await;
+            if frame.is_barrier() {
+                context.send(frame).await;
                 continue;
             }
 
             // ── EOF ──
-            if row.is_eof() {
-                let eof_source = row.source.clone();
+            if frame.is_eof() {
+                let eof_source = frame.source.clone();
                 let remaining =
                     upstream_remain.fetch_sub(1, Ordering::Relaxed) - 1;
                 if remaining <= 0 {
                     Self::handle_eof(
-                        row,
+                        frame,
                         &self_id,
                         &target_id,
                         target_cloned,
@@ -374,24 +374,24 @@ impl PhysicalTask {
                         .map(|c| c.elapsed())
                         .unwrap_or_default();
                     trace!(
-                        "[chan:{self_id}→{target_id}] done: {fwd_row_count} rows in {elapsed:.2?} ({:.1} rows/ms)",
-                        fwd_row_count as f64 / elapsed.as_millis().max(1) as f64
+                        "[chan:{self_id}→{target_id}] done: {fwd_frame_count} frames in {elapsed:.2?} ({:.1} frames/ms)",
+                        fwd_frame_count as f64 / elapsed.as_millis().max(1) as f64
                     );
                 }
                 break;
             }
 
-            // ── Data row ──
+            // ── Data frame ──
             #[cfg(feature = "trace-physical")]
             {
                 if fwd_clock.is_none() {
                     fwd_clock = Some(tokio::time::Instant::now());
                 }
-                fwd_row_count += 1;
+                fwd_frame_count += 1;
             }
 
             Self::process_row(
-                row,
+                frame,
                 &target_logical,
                 &context,
                 edge_filter_fn.as_ref(),
@@ -404,8 +404,8 @@ impl PhysicalTask {
     /// Dispatcher: recv from upstream, edge-filter, round-robin to workers.
     /// On EOF: drain all workers (join handles), then fire on_eof.
     async fn dispatch_loop(
-        mut rx: tokio::sync::mpsc::Receiver<Row>,
-        worker_txs: Vec<tokio::sync::mpsc::Sender<Row>>,
+        mut rx: tokio::sync::mpsc::Receiver<Frame>,
+        worker_txs: Vec<tokio::sync::mpsc::Sender<Frame>>,
         mut worker_handles: Vec<JoinHandle<anyhow::Result<()>>>,
         self_cloned: &Arc<Mutex<TaskCore>>,
         target_cloned: &Arc<Mutex<PhysicalTask>>,
@@ -439,24 +439,24 @@ impl PhysicalTask {
         let (mut fwd_clock, mut fwd_row_count): (Option<tokio::time::Instant>, u64) =
             (None, 0);
 
-        while let Some(mut row) = rx.recv().await {
+        while let Some(mut frame) = rx.recv().await {
             if !started {
                 Self::ensure_started(target_cloned, &context).await?;
                 started = true;
             }
 
             // ── Barrier ── (forwarded downstream as-is)
-            if row.is_barrier() {
-                context.send(row).await;
+            if frame.is_barrier() {
+                context.send(frame).await;
                 continue;
             }
 
             // ── EOF ──
-            if row.is_eof() {
-                let eof_source = row.source.clone();
+            if frame.is_eof() {
+                let eof_source = frame.source.clone();
                 // Drain workers: send EOF to each, then join their handles.
                 for tx in &worker_txs {
-                    let _ = tx.send(Row::eof(self_id.clone())).await;
+                    let _ = tx.send(Frame::eof(self_id.clone())).await;
                 }
                 drop(worker_txs); // close remaining worker channels
                 for handle in worker_handles.drain(..) {
@@ -471,7 +471,7 @@ impl PhysicalTask {
                     upstream_remain.fetch_sub(1, Ordering::Relaxed) - 1;
                 if remaining <= 0 {
                     Self::handle_eof(
-                        row,
+                        frame,
                         &self_id,
                         &target_id,
                         target_cloned,
@@ -488,14 +488,14 @@ impl PhysicalTask {
                         .map(|c| c.elapsed())
                         .unwrap_or_default();
                     trace!(
-                        "[chan:{self_id}→{target_id}] done: {fwd_row_count} rows in {elapsed:.2?} ({:.1} rows/ms)",
+                        "[chan:{self_id}→{target_id}] done: {fwd_row_count} frames in {elapsed:.2?} ({:.1} frames/ms)",
                         fwd_row_count as f64 / elapsed.as_millis().max(1) as f64
                     );
                 }
                 break;
             }
 
-            // ── Data row ──
+            // ── Data frame ──
             #[cfg(feature = "trace-physical")]
             {
                 if fwd_clock.is_none() {
@@ -507,8 +507,8 @@ impl PhysicalTask {
             // Edge filter (serial, single point).
             let matched = match edge_filter_fn.as_ref() {
                 Some(filter) => {
-                    let row_arc = Arc::new(Mutex::new(row));
-                    let lua_row = LuaRow::wrap(row_arc.clone()).await;
+                    let row_arc = Arc::new(Mutex::new(frame));
+                    let lua_row = LuaFrame::wrap(row_arc.clone()).await;
                     let r = row_arc.lock().await.to_owned();
                     let ok = filter.call::<bool>(lua_row).unwrap_or(true);
                     if ok {
@@ -517,7 +517,7 @@ impl PhysicalTask {
                         None
                     }
                 }
-                None => Some(row),
+                None => Some(frame),
             };
 
             if let Some(data_row) = matched {
@@ -533,7 +533,7 @@ impl PhysicalTask {
 
     /// Worker: receive rows from dispatcher, run parallel compute.
     async fn worker_loop(
-        mut rx: tokio::sync::mpsc::Receiver<Row>,
+        mut rx: tokio::sync::mpsc::Receiver<Frame>,
         target_cloned: &Arc<Mutex<PhysicalTask>>,
         states: GraphStates,
         worker_lua: Option<Arc<Mutex<mlua::Lua>>>,
@@ -558,9 +558,9 @@ impl PhysicalTask {
         let (mut fwd_clock, mut fwd_row_count): (Option<tokio::time::Instant>, u64) =
             (None, 0);
 
-        while let Some(mut row) = rx.recv().await {
+        while let Some(mut frame) = rx.recv().await {
             // ── EOF ──
-            if row.is_eof() {
+            if frame.is_eof() {
                 break;
             }
 
@@ -572,53 +572,53 @@ impl PhysicalTask {
                 fwd_row_count += 1;
             }
 
-            Self::process_row(row, &target_logical, &context, None).await?;
+            Self::process_row(frame, &target_logical, &context, None).await?;
         }
 
         #[cfg(feature = "trace-physical")]
         {
             let elapsed = fwd_clock.map(|c| c.elapsed()).unwrap_or_default();
             trace!(
-                "[worker#{worker_id}] done: {fwd_row_count} rows in {elapsed:.2?}",
+                "[worker#{worker_id}] done: {fwd_row_count} frames in {elapsed:.2?}",
             );
         }
         Ok(())
     }
 
-    /// Shared per-row compute (with optional edge filter).
+    /// Shared per-frame compute (with optional edge filter).
     async fn process_row(
-        mut row: Row,
+        mut frame: Frame,
         target_logical: &Arc<Box<dyn LogicalTask + Send + Sync>>,
         context: &TaskContext,
         edge_filter_fn: Option<&mlua::Function>,
     ) -> anyhow::Result<()> {
-        // Set barrier_ref from row offset for downstream grouping.
-        let recv_barrier_ref = row.barrier_ref;
+        // Set barrier_ref from frame offset for downstream grouping.
+        let recv_barrier_ref = frame.barrier_ref;
         let group_key = if recv_barrier_ref > 0 {
             recv_barrier_ref
         } else {
-            row.offset
+            frame.offset
         };
         context.sender.set_barrier_ref(group_key);
 
         if edge_filter_fn.is_none() {
             let context_ptr = Box::into_raw(Box::new(context.clone()));
-            let row_ptr = Box::into_raw(Box::new(row));
+            let row_ptr = Box::into_raw(Box::new(frame));
             target_logical
                 .internal_compute(row_ptr, context_ptr)?
                 .await?;
         } else {
             let filter = edge_filter_fn.unwrap();
             let matched = {
-                let row_arc = Arc::new(Mutex::new(row));
-                let lua_row = LuaRow::wrap(row_arc.clone()).await;
-                row = row_arc.lock().await.to_owned();
+                let row_arc = Arc::new(Mutex::new(frame));
+                let lua_row = LuaFrame::wrap(row_arc.clone()).await;
+                frame = row_arc.lock().await.to_owned();
                 filter.call::<bool>(lua_row).unwrap_or(true)
             };
 
             if matched {
                 let context_ptr = Box::into_raw(Box::new(context.clone()));
-                let row_ptr = Box::into_raw(Box::new(row));
+                let row_ptr = Box::into_raw(Box::new(frame));
                 target_logical
                     .internal_compute(row_ptr, context_ptr)?
                     .await?;
@@ -640,7 +640,7 @@ impl PhysicalTask {
                 .as_millis() as u64;
             target_physical_task.stats.start_time_millis = cts;
             target_physical_task
-                .on_start(Row::start(), context)
+                .on_start(Frame::start(), context)
                 .await?;
         }
         Ok(())
@@ -648,18 +648,18 @@ impl PhysicalTask {
 
     /// Handle EOF: run on_eof + propagate downstream.
     async fn handle_eof(
-        row: Row,
+        frame: Frame,
         self_id: &str,
         target_id: &str,
         target_cloned: &Arc<Mutex<PhysicalTask>>,
         context: &TaskContext,
     ) {
-        let cloned = row.clone();
+        let cloned = frame.clone();
         {
             #[cfg(feature = "trace-physical")]
             let eof_clock = tokio::time::Instant::now();
             let target_physical_task = target_cloned.lock().await;
-            match target_physical_task.on_eof(row, context).await {
+            match target_physical_task.on_eof(frame, context).await {
                 Ok(_) => {}
                 Err(error) => {
                     error!(
@@ -730,7 +730,7 @@ impl PhysicalTask {
                 let func = lua
                     .load(format!(
                         r#"
-                    function(row)
+                    function(frame)
                     {}
                     end
                     "#,

@@ -1,64 +1,64 @@
 use crate::proto::transfer::DataType::unknown;
-use crate::proto::transfer::{Column, DataType, Row};
+use crate::proto::transfer::{Column, DataType, Frame};
 use protobuf::Enum;
 use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
 
-/// indicate the `end of file` for row data.
-const ROW_MASK_EOF: u32 = 1 << 0;
-/// indicate the barrier of the row data.
-const ROW_MASK_BARRIER: u32 = 1 << 1;
+/// indicate the `end of file` for frame data.
+const FRAME_MASK_EOF: u32 = 1 << 0;
+/// indicate the barrier of the frame data.
+const FRAME_MASK_BARRIER: u32 = 1 << 1;
 /// indicate the task already signal.
-const ROW_MASK_READY_SIGNAL: u32 = 1 << 2;
+const FRAME_MASK_READY_SIGNAL: u32 = 1 << 2;
 /// watermark
 const WATERMARK: u32 = 1 << 3;
 /// start
 const START: u32 = 1 << 4;
-/// indicate the row data is raw string data.
+/// indicate the frame data is raw string data.
 pub const RAW_STR: u32 = 1 << 5;
-/// indicate the row data is raw bytes data.
+/// indicate the frame data is raw bytes data.
 pub const RAW_BYTES: u32 = 1 << 6;
 
 /// static function for create `EOF`, `BARRIER` and so on.
-impl Row {
-    /// create `EOF` mask row.
-    pub fn eof(source: String) -> Row {
-        let mut row = Row::new();
-        row.mask = ROW_MASK_EOF;
-        row.source = source;
-        row
+impl Frame {
+    /// create `EOF` mask frame.
+    pub fn eof(source: String) -> Frame {
+        let mut frame = Frame::new();
+        frame.mask = FRAME_MASK_EOF;
+        frame.source = source;
+        frame
     }
 
-    /// create `BARRIER` mask row with source and barrier reference offset.
-    pub fn barrier(source: String, offset: u64) -> Row {
-        let mut row = Row::new();
-        row.mask = ROW_MASK_BARRIER;
-        row.source = source;
-        row.offset = offset;
-        row
+    /// create `BARRIER` mask frame with source and barrier reference offset.
+    pub fn barrier(source: String, offset: u64) -> Frame {
+        let mut frame = Frame::new();
+        frame.mask = FRAME_MASK_BARRIER;
+        frame.source = source;
+        frame.offset = offset;
+        frame
     }
 
     /** watermark */
-    pub fn watermark(source: String, offset: u64) -> Row {
-        let mut row = Row::new();
-        row.offset = offset;
-        row.mask = WATERMARK;
-        row.source = source;
-        row
+    pub fn watermark(source: String, offset: u64) -> Frame {
+        let mut frame = Frame::new();
+        frame.offset = offset;
+        frame.mask = WATERMARK;
+        frame.source = source;
+        frame
     }
 
-    pub fn start() -> Row {
-        let mut row = Row::new();
-        row.mask = START;
-        row
+    pub fn start() -> Frame {
+        let mut frame = Frame::new();
+        frame.mask = START;
+        frame
     }
 
     pub fn is_eof(&self) -> bool {
-        self.mask & ROW_MASK_EOF == ROW_MASK_EOF
+        self.mask & FRAME_MASK_EOF == FRAME_MASK_EOF
     }
 
     pub fn is_barrier(&self) -> bool {
-        self.mask & ROW_MASK_BARRIER == ROW_MASK_BARRIER
+        self.mask & FRAME_MASK_BARRIER == FRAME_MASK_BARRIER
     }
 
     pub fn is_watermark(&self) -> bool {
@@ -66,7 +66,7 @@ impl Row {
     }
 }
 
-impl Row {
+impl Frame {
     pub fn display_column_names(&self) {
         let columns = &self.columns;
         println!(
@@ -80,7 +80,7 @@ impl Row {
     }
 }
 
-impl Display for Row {
+impl Display for Frame {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let columns = &self.columns;
         let row_string = columns

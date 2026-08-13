@@ -9,7 +9,7 @@ pub mod config;
 pub mod error;
 pub mod graph;
 pub mod proto;
-pub mod row;
+pub mod frame;
 pub mod runtime;
 pub mod units;
 

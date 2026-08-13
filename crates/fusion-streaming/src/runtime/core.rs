@@ -3,7 +3,7 @@ use crate::runtime::physical::PhysicalTask;
 use crate::runtime::plugin::PluginManager;
 use crate::runtime::scripts::{GraphLua, GraphTera};
 use fusion_unit_sdk::graph::types::{EdgeCondition, EdgeConfig, TaskContext};
-use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
+use fusion_unit_sdk::proto::transfer::{Column, DataType, Frame};
 use fusion_unit_sdk::runtime::state::GraphStates;
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use itertools::{Itertools, cloned};
@@ -376,30 +376,30 @@ impl LuaContext {
 
 impl UserData for LuaContext {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_async_method_mut("send", |lua, mut this, row: LuaRow| async move {
-            let row = row.row.lock().await;
-            let cloned_row = row.clone();
+        methods.add_async_method_mut("send", |lua, mut this, frame: LuaFrame| async move {
+            let frame = frame.frame.lock().await;
+            let cloned_row = frame.clone();
             this.context.send(cloned_row).await;
             Ok(())
         });
 
-        methods.add_async_method_mut("newRow", |lua, mut this, args: ()| async move {
-            Ok(LuaRow::new())
+        methods.add_async_method_mut("newFrame", |lua, mut this, args: ()| async move {
+            Ok(LuaFrame::new())
         });
     }
 }
 
 #[derive(Clone)]
-pub struct LuaRow {
-    row: Arc<Mutex<Row>>,
+pub struct LuaFrame {
+    frame: Arc<Mutex<Frame>>,
     offset: u64,
     field_index: Arc<Mutex<HashMap<String, usize>>>,
 }
 
-impl LuaRow {
-    pub(crate) async fn wrap(row: Arc<Mutex<Row>>) -> Self {
-        let mut lua_row = LuaRow::new();
-        let r = row.lock().await;
+impl LuaFrame {
+    pub(crate) async fn wrap(frame: Arc<Mutex<Frame>>) -> Self {
+        let mut lua_row = LuaFrame::new();
+        let r = frame.lock().await;
         let columns = &r.columns;
         let mut field_idx = HashMap::new();
         for (idx, column) in columns.iter().enumerate() {
@@ -407,13 +407,13 @@ impl LuaRow {
         }
         lua_row.field_index = Arc::new(Mutex::new(field_idx));
         lua_row.offset = r.offset;
-        lua_row.row = row.clone();
+        lua_row.frame = frame.clone();
         lua_row
     }
 
     fn new() -> Self {
         Self {
-            row: Arc::new(Mutex::new(Row::new())),
+            frame: Arc::new(Mutex::new(Frame::new())),
             field_index: Arc::new(Mutex::new(HashMap::new())),
             offset: 0,
         }
@@ -463,31 +463,31 @@ impl LuaRow {
         match f_idx {
             None => {
                 // new column
-                let mut row = self.row.lock().await;
-                row.columns.push(col);
+                let mut frame = self.frame.lock().await;
+                frame.columns.push(col);
             }
             Some(idx) => {
-                let mut row = self.row.lock().await;
-                row.columns[*idx] = col;
+                let mut frame = self.frame.lock().await;
+                frame.columns[*idx] = col;
             }
         }
         Ok(())
     }
 }
 
-impl UserData for LuaRow {
+impl UserData for LuaFrame {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_async_meta_function(
             mlua::MetaMethod::Index,
-            |lua, (row, key): (LuaRow, String)| async move {
+            |lua, (frame, key): (LuaFrame, String)| async move {
                 if key.eq("offset") {
-                    return Ok(Value::Integer(row.offset as i64));
+                    return Ok(Value::Integer(frame.offset as i64));
                 }
-                let index = row.field_index.lock().await;
+                let index = frame.field_index.lock().await;
                 match index.get(&key) {
                     None => Ok(Value::Nil),
                     Some(idx) => {
-                        let r = row.row.lock().await;
+                        let r = frame.frame.lock().await;
                         let c = &r.columns[*idx];
                         match c.dt.unwrap() {
                             DataType::unknown => Ok(Value::Nil),
@@ -513,8 +513,8 @@ impl UserData for LuaRow {
 
         methods.add_async_meta_function(
             mlua::MetaMethod::NewIndex,
-            |lua, (mut row, key, value): (LuaRow, mlua::String, Value)| async move {
-                row.update_column(key, value).await
+            |lua, (mut frame, key, value): (LuaFrame, mlua::String, Value)| async move {
+                frame.update_column(key, value).await
             },
         );
 
@@ -525,14 +525,14 @@ impl UserData for LuaRow {
     }
 }
 
-impl FromLua for LuaRow {
+impl FromLua for LuaFrame {
     fn from_lua(value: Value, lua: &Lua) -> mlua::Result<Self> {
         if let mlua::Value::UserData(ud) = value {
-            Ok(ud.borrow::<LuaRow>()?.clone())
+            Ok(ud.borrow::<LuaFrame>()?.clone())
         } else {
             Err(mlua::Error::FromLuaConversionError {
                 from: value.type_name(),
-                to: "LuaRow".to_string(),
+                to: "LuaFrame".to_string(),
                 message: Some("Expected a UserData".to_string()),
             })
         }

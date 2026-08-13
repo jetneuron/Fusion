@@ -1,9 +1,9 @@
 use crate::core::{IntoUniversalIO, RowReader, RowWriter, UniversalIO, UniversalIOConfig};
 use crate::error::IOError;
 use anyhow::anyhow;
-use fusion_unit_sdk::proto::transfer::Row;
-use fusion_unit_sdk::row::serializer::{Formatter, SeparatorFormatter};
-use fusion_unit_sdk::row::utils::RowToString;
+use fusion_unit_sdk::proto::transfer::Frame;
+use fusion_unit_sdk::frame::serializer::{Formatter, SeparatorFormatter};
+use fusion_unit_sdk::frame::utils::FrameToString;
 use fusion_unit_sdk::units::config_util::UnitConfigExt;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
@@ -43,19 +43,19 @@ impl LocalFileSystem {
 }
 
 impl RowReader for LocalFileSystem {
-    type Reader = Box<dyn Iterator<Item = Result<Row, IOError>>>;
+    type Reader = Box<dyn Iterator<Item = Result<Frame, IOError>>>;
 
     fn rows(&self) -> anyhow::Result<Self::Reader, IOError> {
         let file = File::open(&self.path).map_err(|e| IOError::OpenError(e.to_string()))?;
         let reader = BufReader::new(file);
         let formatter = Box::new(SeparatorFormatter::new(self.column_separator.clone()));
-        Ok(Box::new(IterableRow { reader, formatter }))
+        Ok(Box::new(IterableFrame { reader, formatter }))
     }
 }
 
 impl RowWriter for LocalFileSystem {
-    fn write(&self, row: Row) -> Result<(), IOError> {
-        let line = row
+    fn write(&self, frame: Frame) -> Result<(), IOError> {
+        let line = frame
             .row_to_string(&self.column_separator)
             .map_err(|err| IOError::FieldFormatError(err.to_string()))?;
         if let Some(writer) = self.writer.as_ref() {
@@ -74,7 +74,7 @@ impl RowWriter for LocalFileSystem {
 }
 
 impl UniversalIO for LocalFileSystem {
-    type Reader = Box<dyn Iterator<Item = Result<Row, IOError>>>;
+    type Reader = Box<dyn Iterator<Item = Result<Frame, IOError>>>;
 
     fn get_universal_config(&self) -> &UniversalIOConfig {
         todo!()
@@ -88,26 +88,26 @@ impl UniversalIO for LocalFileSystem {
         self.rows()
     }
 
-    fn write_row(&self, row: Row) -> anyhow::Result<()> {
-        self.write(row).map_err(|err| anyhow!(err))
+    fn write_row(&self, frame: Frame) -> anyhow::Result<()> {
+        self.write(frame).map_err(|err| anyhow!(err))
     }
 
     fn close(&self) -> anyhow::Result<()> {
         Ok(())
     }
 }
-pub trait IntoIterableRow {
+pub trait IntoIterableFrame {
     type Source;
 
     fn into_row(self) -> anyhow::Result<Self::Source>;
 }
-pub struct IterableRow {
+pub struct IterableFrame {
     reader: BufReader<File>,
     formatter: Box<dyn Formatter<String>>,
 }
 
-impl Iterator for IterableRow {
-    type Item = anyhow::Result<Row, IOError>;
+impl Iterator for IterableFrame {
+    type Item = anyhow::Result<Frame, IOError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut line = String::default();

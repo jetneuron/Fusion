@@ -19,14 +19,14 @@ pub trait CapabilitySpreadsheetEngine: Capability {
         path: &str,
         sheet: &str,
         skip_rows: u64,
-    ) -> UnitResult<Vec<crate::proto::transfer::Row>>;
+    ) -> UnitResult<Vec<crate::proto::transfer::Frame>>;
 
     /// Write rows to a sheet in a spreadsheet file.
     async fn write_sheet(
         &self,
         path: &str,
         sheet: &str,
-        rows: &[crate::proto::transfer::Row],
+        frames: &[crate::proto::transfer::Frame],
     ) -> UnitResult<()>;
 }
 

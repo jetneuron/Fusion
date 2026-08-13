@@ -1,5 +1,5 @@
 use crate::graph::types::{TaskContext, UnitIdx};
-use crate::proto::transfer::Row;
+use crate::proto::transfer::Frame;
 use crate::runtime::state::GraphStates;
 use crate::runtime::UnitResult;
 use std::pin::Pin;
@@ -45,12 +45,12 @@ pub trait Scripter: 'static {
         'life0: 'async_trait,
         Self: 'async_trait;
 
-    fn row_eval<'life0, 'async_trait>(
+    fn frame_eval<'life0, 'async_trait>(
         &self,
         task_id: &UnitIdx,
         states: GraphStates,
         ctx: &TaskContext,
-        row: Row,
+        frame: Frame,
     ) -> Pin<Box<dyn Future<Output = UnitResult<()>> + Send>>
     where
         'life0: 'async_trait,

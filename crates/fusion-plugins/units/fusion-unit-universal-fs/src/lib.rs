@@ -11,7 +11,7 @@ use fusion_derive::LogicalTask;
 use fusion_unit_sdk::graph::types::{
     ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext, UnitMeta,
 };
-use fusion_unit_sdk::proto::transfer::Row;
+use fusion_unit_sdk::proto::transfer::Frame;
 use fusion_unit_sdk::runtime::logical::LogicalTaskMeta;
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use fusion_unit_sdk::units::config_util::UnitConfigExt;
@@ -42,7 +42,7 @@ impl GraphUnitPlugin for UniversalFsUnitPlugin {
 }
 
 pub type BoxedUniversalIO =
-    Box<dyn UniversalIO<Reader = Box<dyn Iterator<Item = Result<Row, IOError>>>>>;
+    Box<dyn UniversalIO<Reader = Box<dyn Iterator<Item = Result<Frame, IOError>>>>>;
 
 #[derive(Default, LogicalTask)]
 pub struct UniversalFsUnitTask {
@@ -104,15 +104,15 @@ impl SourceUnit for UniversalFsUnitTask {
                 .iter_rows()
                 .map_err(|err| UnitError::IOError(err.to_string()))?
             {
-                let row =
+                let frame =
                     row_result.map_err(|err| UnitError::InvalidateRowFormat(err.to_string()))?;
-                tx.blocking_send(row)?;
+                tx.blocking_send(frame)?;
             }
             Ok(())
         });
         Ok(async move {
-            while let Some(row) = rx.recv().await {
-                ctx.send(row).await;
+            while let Some(frame) = rx.recv().await {
+                ctx.send(frame).await;
             }
             Ok(())
         })
@@ -122,7 +122,7 @@ impl SourceUnit for UniversalFsUnitTask {
 impl MapUnit for UniversalFsUnitTask {
     fn compute<'life0, 'async_trait>(
         &'life0 self,
-        row: Row,
+        frame: Frame,
         ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
@@ -134,14 +134,14 @@ impl MapUnit for UniversalFsUnitTask {
                 .sink_io_inst
                 .as_ref()
                 .with_context(|| "I/O Instance unready.")?;
-            io.write_row(row)?;
+            io.write_row(frame)?;
             Ok(())
         })
     }
 
     fn on_eof<'life0, 'async_trait>(
         &'life0 self,
-        row: Row,
+        frame: Frame,
         ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where

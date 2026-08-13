@@ -15,7 +15,7 @@
 use datafusion::prelude::*;
 use fusion_unit_sdk::capability::capability_sql_engine::well_known;
 use fusion_unit_sdk::capability::{self, Capability, CapabilityPlugin, CapabilitySqlEngine};
-use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
+use fusion_unit_sdk::proto::transfer::{Column, DataType, Frame};
 use fusion_unit_sdk::runtime::UnitResult;
 use protobuf::EnumOrUnknown;
 use log;
@@ -70,7 +70,7 @@ impl Capability for DataFusionCapability {
 
 #[async_trait::async_trait]
 impl CapabilitySqlEngine for DataFusionCapability {
-    async fn query(&self, sql: &str) -> UnitResult<Vec<Row>> {
+    async fn query(&self, sql: &str) -> UnitResult<Vec<Frame>> {
         let ctx = self.ctx.lock().await;
         let df = match ctx.sql(sql).await {
             Ok(df) => df,
@@ -91,7 +91,7 @@ impl CapabilitySqlEngine for DataFusionCapability {
         for batch in &batches {
             let schema = batch.schema();
             for row_idx in 0..batch.num_rows() {
-                let mut row = Row::new();
+                let mut frame = Frame::new();
                 for (col_idx, field) in schema.fields().iter().enumerate() {
                     let column = batch.column(col_idx);
                     let mut c = Column::new();
@@ -150,9 +150,9 @@ impl CapabilitySqlEngine for DataFusionCapability {
                             c.dt = EnumOrUnknown::from(DataType::str);
                         }
                     }
-                    row.columns.push(c);
+                    frame.columns.push(c);
                 }
-                rows.push(row);
+                rows.push(frame);
             }
         }
         Ok(rows)

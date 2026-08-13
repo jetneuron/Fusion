@@ -19,13 +19,13 @@ pub trait CapabilityDocumentDatabase: Capability {
         collection: &str,
         filter: serde_json::Value,
         limit: Option<u64>,
-    ) -> UnitResult<Vec<crate::proto::transfer::Row>>;
+    ) -> UnitResult<Vec<crate::proto::transfer::Frame>>;
 
     /// Insert documents into a collection. Returns the count inserted.
     async fn insert(
         &self,
         collection: &str,
-        docs: &[crate::proto::transfer::Row],
+        docs: &[crate::proto::transfer::Frame],
     ) -> UnitResult<u64>;
 }
 

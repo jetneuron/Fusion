@@ -15,14 +15,14 @@
 //!       $script: |
 //!         local keys = this:scan("user:*")
 //!         for _, entry in ipairs(keys) do
-//!           local row = ctx:newRow()
-//!           row['key'] = entry['key']
-//!           row['value'] = entry['value']
-//!           ctx:send(row)
+//!           local frame = ctx:newFrame()
+//!           frame['key'] = entry['key']
+//!           frame['value'] = entry['value']
+//!           ctx:send(frame)
 //!         end
 //! ```
 //!
-//! ## YAML (Map — enrich row with KV lookup)
+//! ## YAML (Map — enrich frame with KV lookup)
 //!
 //! ```yaml
 //! units:
@@ -44,7 +44,7 @@ use fusion_unit_sdk::capability::capability_key_value_store::ScanOptions;
 use fusion_unit_sdk::graph::types::{
     ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext, UnitMeta,
 };
-use fusion_unit_sdk::proto::transfer::Row;
+use fusion_unit_sdk::proto::transfer::Frame;
 use fusion_unit_sdk::runtime::logical::LogicalTaskMeta;
 use fusion_unit_sdk::runtime::script::Scripter;
 use fusion_unit_sdk::runtime::script::script_registry;
@@ -167,7 +167,7 @@ enum ScriptMode {
     /// Static script — compiled once via scripter, cached across rows.
     Static(Arc<Mutex<Box<dyn Scripter + Send>>>),
     /// Dynamic script with `{{ ... }}` Tera placeholders baked in.
-    /// Rendered per-row (context varies), executed as a raw Lua chunk.
+    /// Rendered per-frame (context varies), executed as a raw Lua chunk.
     Dynamic { template: String },
 }
 
@@ -242,7 +242,7 @@ impl InitUnit for RedisUnitTask {
             let scripter = script_registry::create_scripter(&script_type, rendered, states);
             Some(ScriptMode::Static(scripter))
         } else if has_tera && unit.is_mapper() {
-            // Map + Tera: render per-row, execute as raw Lua chunk.
+            // Map + Tera: render per-frame, execute as raw Lua chunk.
             Some(ScriptMode::Dynamic {
                 template: raw_script,
             })
@@ -273,10 +273,10 @@ impl RedisUnitTask {
         })
     }
 
-    /// Execute via the cached scripter (static script, no per-row Tera).
+    /// Execute via the cached scripter (static script, no per-frame Tera).
     async fn run_static(
         &self,
-        row: Row,
+        frame: Frame,
         ctx: &TaskContext,
         states: &GraphStates,
         scripter: &Arc<Mutex<Box<dyn Scripter + Send>>>,
@@ -318,15 +318,15 @@ impl RedisUnitTask {
         // before awaiting — parallel workers don't serialize here.
         let eval_fut = {
             let scripter = scripter.lock().await;
-            scripter.row_eval(&task_id, states.clone(), ctx, row)
+            scripter.frame_eval(&task_id, states.clone(), ctx, frame)
         };
         eval_fut.await
     }
 
-    /// Execute with per-row Tera rendering (map mode only).
+    /// Execute with per-frame Tera rendering (map mode only).
     async fn run_dynamic(
         &self,
-        row: Row,
+        frame: Frame,
         ctx: &TaskContext,
         states: &GraphStates,
         template: &str,
@@ -348,9 +348,9 @@ impl RedisUnitTask {
                 .clone(),
         };
 
-        // Render Tera with row column values.
+        // Render Tera with frame column values.
         let mut tera_ctx = tera::Context::new();
-        for col in &row.columns {
+        for col in &frame.columns {
             let val = match col.dt.unwrap() {
                 fusion_unit_sdk::proto::transfer::DataType::str => col.str_val.clone(),
                 fusion_unit_sdk::proto::transfer::DataType::i32 => col.i32_val.to_string(),
@@ -375,11 +375,11 @@ impl RedisUnitTask {
         // Execute as raw Lua chunk.
         let lua = lua_arc.lock().await;
 
-        // Build data table from row columns.
+        // Build data table from frame columns.
         let data = lua.create_table().map_err(|e| {
             fusion_unit_sdk::runtime::UnitError::unknown(format!("create table: {e}"))
         })?;
-        for col in &row.columns {
+        for col in &frame.columns {
             let r: mlua::Result<()> = match col.dt.unwrap() {
                 fusion_unit_sdk::proto::transfer::DataType::str => {
                     data.set(col.field.clone(), col.str_val.clone())
@@ -437,16 +437,16 @@ impl RedisUnitTask {
 
     async fn run_script(
         &self,
-        row: Row,
+        frame: Frame,
         ctx: &TaskContext,
         states: &GraphStates,
     ) -> UnitResult<()> {
         match self.script_mode.as_ref() {
             Some(ScriptMode::Static(scripter)) => {
-                self.run_static(row, ctx, states, scripter).await
+                self.run_static(frame, ctx, states, scripter).await
             }
             Some(ScriptMode::Dynamic { template }) => {
-                self.run_dynamic(row, ctx, states, template).await
+                self.run_dynamic(frame, ctx, states, template).await
             }
             None => Err(fusion_unit_sdk::runtime::UnitError::unknown(
                 "script mode not initialized",
@@ -456,7 +456,7 @@ impl RedisUnitTask {
 }
 
 // ============================================================
-// Source — execute Lua once with empty seed row
+// Source — execute Lua once with empty seed frame
 // ============================================================
 
 impl SourceUnit for RedisUnitTask {
@@ -466,19 +466,19 @@ impl SourceUnit for RedisUnitTask {
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send> {
         let states = ctx.states.clone();
         Ok(async move {
-            self.run_script(Row::new(), &ctx, &states).await
+            self.run_script(Frame::new(), &ctx, &states).await
         })
     }
 }
 
 // ============================================================
-// Map — execute Lua for each incoming row
+// Map — execute Lua for each incoming frame
 // ============================================================
 
 impl MapUnit for RedisUnitTask {
     fn compute<'life0, 'async_trait>(
         &'life0 self,
-        row: Row,
+        frame: Frame,
         ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
@@ -486,6 +486,6 @@ impl MapUnit for RedisUnitTask {
         Self: 'async_trait,
     {
         let states = ctx.states.clone();
-        Ok(async move { self.run_script(row, ctx, &states).await })
+        Ok(async move { self.run_script(frame, ctx, &states).await })
     }
 }

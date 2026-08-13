@@ -1,5 +1,5 @@
-use crate::proto::transfer::{Column, DataType, Row};
-use crate::row::types::{ColumnDescriptor, IntoColumn};
+use crate::proto::transfer::{Column, DataType, Frame};
+use crate::frame::types::{ColumnDescriptor, IntoColumn};
 use anyhow::{bail, Context};
 use protobuf::EnumOrUnknown;
 
@@ -51,13 +51,13 @@ impl<T: Into<String>> IntoColumn for T {
 
 #[allow(clippy::wrong_self_convention)]
 pub trait RawFormatter<T> {
-    fn into_row(&self, raw: T) -> anyhow::Result<Row>;
+    fn into_row(&self, raw: T) -> anyhow::Result<Frame>;
 }
-pub trait RowToString {
+pub trait FrameToString {
     fn row_to_string(&self, separator: &str) -> anyhow::Result<String>;
 }
 
-impl RowToString for Row {
+impl FrameToString for Frame {
     fn row_to_string(&self, separator: &str) -> anyhow::Result<String> {
         let str = self
             .columns

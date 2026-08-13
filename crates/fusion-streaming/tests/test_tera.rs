@@ -4,8 +4,8 @@ pub mod test {
 
     static BIG_TABLE_TEMPLATE: &str = r#"
     [
-        {% for row in table %}
-        [{% for col in row %}{"id": {{ col }}}{% if not loop.last %},{% endif %}{% endfor %}]{% if not loop.last %},{% endif %}
+        {% for frame in table %}
+        [{% for col in frame %}{"id": {{ col }}}{% if not loop.last %},{% endif %}{% endfor %}]{% if not loop.last %},{% endif %}
         {% endfor %}
     ]
     {{str}}

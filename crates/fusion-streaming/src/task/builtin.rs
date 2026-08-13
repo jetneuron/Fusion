@@ -1,11 +1,11 @@
-use crate::runtime::core::{LuaContext, LuaRow};
+use crate::runtime::core::{LuaContext, LuaFrame};
 use crate::runtime::scripts;
 use fusion_derive::{MapLogicTask, SinkLogicTask, SrcLogicTask};
 use fusion_unit_sdk::graph::types::{
     ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext, UnitMeta,
 };
-use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
-use fusion_unit_sdk::row::types::RAW_STR;
+use fusion_unit_sdk::proto::transfer::{Column, DataType, Frame};
+use fusion_unit_sdk::frame::types::RAW_STR;
 use fusion_unit_sdk::runtime::logical::LogicalTaskMeta;
 use fusion_unit_sdk::runtime::script::{Script, Scripter, script_registry};
 use fusion_unit_sdk::runtime::script_engine_factory::Product;
@@ -89,7 +89,7 @@ impl SourceUnit for DebugInputUnitTask {
 
         Ok(async move {
             for row_idx in 0..iter_times {
-                let mut row = Row::new();
+                let mut frame = Frame::new();
                 for col_idx in 0..column_count {
                     let mut c = Column::new();
                     c.index = col_idx as u32;
@@ -101,9 +101,9 @@ impl SourceUnit for DebugInputUnitTask {
                     };
                     c.i32_val = val;
                     c.dt = EnumOrUnknown::from(DataType::i32);
-                    row.columns.push(c);
+                    frame.columns.push(c);
                 }
-                ctx.send(row).await;
+                ctx.send(frame).await;
                 if interval_millis > 0 {
                     tokio::time::sleep(Duration::from_millis(interval_millis)).await;
                 }
@@ -123,16 +123,16 @@ impl InitUnit for DebugMapUnitTask {}
 impl MapUnit for DebugMapUnitTask {
     fn compute<'life0, 'async_trait>(
         &'life0 self,
-        row: Row,
+        frame: Frame,
         ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
         'life0: 'async_trait,
         Self: 'async_trait,
     {
-        let c = &row.columns;
+        let c = &frame.columns;
         Ok(async move {
-            ctx.send(row).await;
+            ctx.send(frame).await;
             Ok(())
         })
     }
@@ -173,12 +173,12 @@ impl InitUnit for MapUnitTask {
 }
 
 impl MapUnitTask {
-    async fn init_compute_table<'a>(&self, row: Row) -> Table {
+    async fn init_compute_table<'a>(&self, frame: Frame) -> Table {
         let row_table = {
             let lua = self.lua.lock().await;
             lua.create_table().expect("failed to create lua table")
         };
-        for column in row.columns.clone() {
+        for column in frame.columns.clone() {
             let field = column.field;
             match column.dt.unwrap() {
                 DataType::unknown => {
@@ -201,7 +201,7 @@ impl MapUnitTask {
 impl MapUnit for MapUnitTask {
     fn compute<'life0, 'async_trait>(
         &'life0 self,
-        row: Row,
+        frame: Frame,
         ctx: &'life0 TaskContext,
     ) -> Result<impl Future<Output = Result<(), UnitError>> + Send, anyhow::Error>
     where
@@ -219,7 +219,7 @@ impl MapUnit for MapUnitTask {
             // before awaiting — parallel workers don't serialize here.
             let eval_fut = {
                 let scripter = scripter.lock().await;
-                scripter.row_eval(&id, states, ctx, row)
+                scripter.frame_eval(&id, states, ctx, frame)
             };
             eval_fut.await?;
             Ok(())
@@ -277,7 +277,7 @@ impl InitUnit for DebugOutputUnitTask {
 impl MapUnit for DebugOutputUnitTask {
     fn compute<'life0, 'async_trait>(
         &'life0 self,
-        row: Row,
+        frame: Frame,
         ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
@@ -290,9 +290,9 @@ impl MapUnit for DebugOutputUnitTask {
         Ok(async move {
             if !hide_console {
                 let id = ctx.unit.get_id();
-                let offset = row.offset;
+                let offset = frame.offset;
                 if offset == 1 && !hide_header {
-                    let columns = &row.columns;
+                    let columns = &frame.columns;
                     let mut headers = String::new();
                     let mut types = String::new();
 
@@ -307,47 +307,47 @@ impl MapUnit for DebugOutputUnitTask {
                         headers.remove(headers.len() - 1);
                         types.remove(types.len() - 1);
                     }
-                    if row.mask == RAW_STR {
+                    if frame.mask == RAW_STR {
                         println!(
-                            "\x1b[31m[{}->{}]\t#row\x1b[0m\t{}",
-                            &row.source, id, "RAW_STR"
+                            "\x1b[31m[{}->{}]\t#frame\x1b[0m\t{}",
+                            &frame.source, id, "RAW_STR"
                         );
                     } else {
                         println!(
-                            "\x1b[31m[{}->{}]\t#row\x1b[0m\t{}",
-                            &row.source, id, &headers
+                            "\x1b[31m[{}->{}]\t#frame\x1b[0m\t{}",
+                            &frame.source, id, &headers
                         );
                         println!(
                             "\x1b[31m[{}->{}]\t#type\x1b[0m\t{}",
-                            &row.source, id, &types
+                            &frame.source, id, &types
                         )
                     }
                 }
 
-                if row.mask == RAW_STR {
+                if frame.mask == RAW_STR {
                     println!(
                         "\x1b[31m[{}->{}]\t#{}\x1b[0m\t{}",
-                        &row.source,
+                        &frame.source,
                         id,
                         offset,
-                        String::from_utf8(row.raw.clone()).unwrap()
+                        String::from_utf8(frame.raw.clone()).unwrap()
                     );
                 } else {
                     println!(
                         "\x1b[31m[{}->{}]\t#{}\x1b[0m\t{}",
-                        &row.source, id, offset, row
+                        &frame.source, id, offset, frame
                     );
                 }
             }
             stats.lock().await.total += 1;
-            ctx.send(row).await;
+            ctx.send(frame).await;
             Ok(())
         })
     }
 
     fn on_eof<'life0, 'async_trait>(
         &'life0 self,
-        row: Row,
+        frame: Frame,
         ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
@@ -359,7 +359,7 @@ impl MapUnit for DebugOutputUnitTask {
         let stats_arc = self.stats.clone();
 
         #[cfg(feature = "trace-logical")]
-        warn!("[{}] receive special mask: EOF. FROM [{}]", id, row.source);
+        warn!("[{}] receive special mask: EOF. FROM [{}]", id, frame.source);
 
         Ok(async move {
             let cts = SystemTime::now()
@@ -371,7 +371,7 @@ impl MapUnit for DebugOutputUnitTask {
                 let total = stats.total;
                 let elapsed = cts - stats.start_time;
                 info!(
-                    "task id [{}] finished (EOF), processed rows: [{}], elapsed = {}ms",
+                    "task id [{}] finished (EOF), processed frames: [{}], elapsed = {}ms",
                     id, total, elapsed
                 );
             }

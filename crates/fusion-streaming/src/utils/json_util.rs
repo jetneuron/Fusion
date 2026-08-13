@@ -1,4 +1,4 @@
-use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
+use fusion_unit_sdk::proto::transfer::{Column, DataType, Frame};
 use jsonpath_rust::JsonPath;
 use petgraph::data::DataMap;
 use petgraph::graph::DiGraph;
@@ -19,7 +19,7 @@ impl JsonRowMapper {
 }
 
 pub trait JsonParse {
-    fn as_row(&self, mappers: Vec<JsonRowMapper>) -> Result<Vec<Row>, Error>;
+    fn as_row(&self, mappers: Vec<JsonRowMapper>) -> Result<Vec<Frame>, Error>;
 }
 
 struct JsonColumnFamilyNode {
@@ -27,7 +27,7 @@ struct JsonColumnFamilyNode {
 }
 
 impl JsonParse for Value {
-    fn as_row(&self, mappers: Vec<JsonRowMapper>) -> Result<Vec<Row>, Error> {
+    fn as_row(&self, mappers: Vec<JsonRowMapper>) -> Result<Vec<Frame>, Error> {
         let mut graph = DiGraph::<JsonColumnFamilyNode, String>::new();
         let mapper_index = transform_as_tree(self, mappers, graph);
 
@@ -40,21 +40,21 @@ impl JsonParse for Value {
         // let mut map = HashMap::new();
         let cloned_for_map = all_mapped.clone();
         //
-        // let mut rows: Vec<Row> = vec![];
+        // let mut rows: Vec<Frame> = vec![];
         // let rows_column = cartesian_product(&merged_table);
         // for r in rows_column {
-        //     let mut row = Row::new();
+        //     let mut frame = Frame::new();
         //     for columns in r.into_iter() {
         //         for column in columns.into_iter() {
-        //             row.columns.push(column);
+        //             frame.columns.push(column);
         //         }
         //     }
-        //     row.columns.sort_by(|c1, c2| {
+        //     frame.columns.sort_by(|c1, c2| {
         //         let idx1 = mapper_index.get(&c1.field).unwrap_or(&0u16);
         //         let idx2 = mapper_index.get(&c2.field).unwrap_or(&0u16);
         //         idx1.cmp(&idx2)
         //     });
-        //     rows.push(row);
+        //     rows.push(frame);
         // }
         Ok(vec![])
     }

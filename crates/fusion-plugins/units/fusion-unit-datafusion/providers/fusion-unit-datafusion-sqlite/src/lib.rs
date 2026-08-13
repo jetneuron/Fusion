@@ -80,10 +80,10 @@ impl TableProviderFactory for SqliteFactory {
                     .collect();
 
                 let types: Vec<DataType> = stmt
-                    .query_row([], |row| {
+                    .query_row([], |frame| {
                         let mut types = Vec::with_capacity(col_count);
                         for i in 0..col_count {
-                            let val = row
+                            let val = frame
                                 .get::<_, rusqlite::types::Value>(i)
                                 .unwrap_or(rusqlite::types::Value::Null);
                             let dt = match val {
@@ -108,9 +108,9 @@ impl TableProviderFactory for SqliteFactory {
             let info: Vec<(String, DataType)> = conn
                 .prepare(&format!("PRAGMA table_info(\"{}\")", table_name))
                 .and_then(|mut s| {
-                    s.query_map([], |row| {
-                        let name: String = row.get(1)?;
-                        let decl: Option<String> = row.get(2)?;
+                    s.query_map([], |frame| {
+                        let name: String = frame.get(1)?;
+                        let decl: Option<String> = frame.get(2)?;
                         Ok((name, sqlite_type_to_arrow(decl.as_deref())))
                     })
                     .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
@@ -144,7 +144,7 @@ impl TableProviderFactory for SqliteFactory {
                     query
                 ),
                 [],
-                |row| row.get(0),
+                |frame| frame.get(0),
             )
             .unwrap_or(0);
 
@@ -156,11 +156,11 @@ impl TableProviderFactory for SqliteFactory {
             })?;
 
             let rows = stmt
-                .query_map([], |row| {
+                .query_map([], |frame| {
                     let mut values: Vec<rusqlite::types::Value> =
                         Vec::with_capacity(col_types.len());
                     for i in 0..col_types.len() {
-                        let val = row
+                        let val = frame
                             .get::<_, rusqlite::types::Value>(i)
                             .unwrap_or(rusqlite::types::Value::Null);
                         values.push(val);
@@ -177,9 +177,9 @@ impl TableProviderFactory for SqliteFactory {
                 .collect();
 
             let mut row_count = 0usize;
-            for row in rows {
-                let vals = row.map_err(|e| {
-                    fusion_unit_sdk::runtime::UnitError::unknown(format!("sqlite row: {e}"))
+            for frame in rows {
+                let vals = frame.map_err(|e| {
+                    fusion_unit_sdk::runtime::UnitError::unknown(format!("sqlite frame: {e}"))
                 })?;
                 for (i, val) in vals.iter().enumerate() {
                     builders[i].append(val);

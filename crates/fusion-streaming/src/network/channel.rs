@@ -1,4 +1,4 @@
-use fusion_unit_sdk::proto::transfer::Row;
+use fusion_unit_sdk::proto::transfer::Frame;
 use tokio::sync::mpsc;
 
 const CHANNEL_BUFFER: usize = 1024;
@@ -9,8 +9,8 @@ const CHANNEL_BUFFER: usize = 1024;
 /// task on that edge.
 pub struct LocalTaskChannel {
     pub(crate) channel_id: Option<String>,
-    senders: Vec<mpsc::Sender<Row>>,
-    pending_receivers: std::sync::Mutex<Vec<mpsc::Receiver<Row>>>,
+    senders: Vec<mpsc::Sender<Frame>>,
+    pending_receivers: std::sync::Mutex<Vec<mpsc::Receiver<Frame>>>,
 }
 
 impl LocalTaskChannel {
@@ -41,12 +41,12 @@ impl LocalTaskChannel {
 
     /// Return a clone of all mpsc senders (cheap — `mpsc::Sender` is an `Arc` internally).
     /// Safe to call multiple times (fan-in targets need one context per incoming edge).
-    pub fn get_senders(&self) -> Vec<mpsc::Sender<Row>> {
+    pub fn get_senders(&self) -> Vec<mpsc::Sender<Frame>> {
         self.senders.clone()
     }
 
     /// Pop one receiver for a forwarding task. Each edge calls this once during `link()`.
-    pub fn take_receiver(&self) -> Option<mpsc::Receiver<Row>> {
+    pub fn take_receiver(&self) -> Option<mpsc::Receiver<Frame>> {
         self.pending_receivers.lock().unwrap().pop()
     }
 }

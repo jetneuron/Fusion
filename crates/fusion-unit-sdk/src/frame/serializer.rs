@@ -1,5 +1,5 @@
-use crate::proto::transfer::{Column, DataType, Row};
-use crate::row::types::{ColumnDescriptor, IntoColumn};
+use crate::proto::transfer::{Column, DataType, Frame};
+use crate::frame::types::{ColumnDescriptor, IntoColumn};
 use protobuf::EnumOrUnknown;
 
 #[derive(Debug, thiserror::Error)]
@@ -10,7 +10,7 @@ pub enum SerializeError {
 
 pub trait Serializer<T> {
     #[allow(clippy::wrong_self_convention)]
-    fn from_row(&self, row: Row) -> anyhow::Result<T, SerializeError>;
+    fn from_row(&self, frame: Frame) -> anyhow::Result<T, SerializeError>;
 }
 
 pub trait Deserializer<T> {
@@ -19,7 +19,7 @@ pub trait Deserializer<T> {
         &self,
         value: T,
         column_descriptors: &Option<Vec<ColumnDescriptor>>,
-    ) -> anyhow::Result<Row, SerializeError>;
+    ) -> anyhow::Result<Frame, SerializeError>;
 }
 
 pub trait Formatter<T>: Serializer<T> + Deserializer<T> {}
@@ -37,8 +37,8 @@ impl SeparatorFormatter {
 
 impl Formatter<String> for SeparatorFormatter {}
 impl Serializer<String> for SeparatorFormatter {
-    fn from_row(&self, row: Row) -> anyhow::Result<String, SerializeError> {
-        let result = row
+    fn from_row(&self, frame: Frame) -> anyhow::Result<String, SerializeError> {
+        let result = frame
             .columns
             .iter()
             .map(|s| {
@@ -66,16 +66,16 @@ impl<T: Into<String>> Deserializer<T> for SeparatorFormatter {
         &self,
         value: T,
         column_descriptors: &Option<Vec<ColumnDescriptor>>,
-    ) -> anyhow::Result<Row, SerializeError> {
+    ) -> anyhow::Result<Frame, SerializeError> {
         let value = value.into();
         if self.separator.is_empty() {
-            let mut row = Row::new();
+            let mut frame = Frame::new();
             let mut column = Column::new();
             column.dt = EnumOrUnknown::from(DataType::str);
             column.str_val = value;
             column.field = String::from("c1");
-            row.columns.push(column);
-            Ok(row)
+            frame.columns.push(column);
+            Ok(frame)
         } else {
             let sep = &self.separator;
             let dyn_column_descriptors;
@@ -113,9 +113,9 @@ impl<T: Into<String>> Deserializer<T> for SeparatorFormatter {
                 })
                 .map(|r| r.unwrap())
                 .collect::<Vec<Column>>();
-            let mut row = Row::new();
-            row.columns = columns;
-            Ok(row)
+            let mut frame = Frame::new();
+            frame.columns = columns;
+            Ok(frame)
         }
     }
 }

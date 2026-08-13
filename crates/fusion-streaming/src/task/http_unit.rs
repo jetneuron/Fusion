@@ -4,7 +4,7 @@ use fusion_derive::{LogicalTask, SrcLogicTask};
 use fusion_unit_sdk::graph::types::{
     ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext, UnitMeta,
 };
-use fusion_unit_sdk::proto::transfer::Row;
+use fusion_unit_sdk::proto::transfer::Frame;
 use fusion_unit_sdk::runtime::logical::LogicalTaskMeta;
 use fusion_unit_sdk::runtime::UnitResult;
 use jsonpath_rust::JsonPath;
@@ -171,7 +171,7 @@ impl SourceUnit for HttpUnitTask {
 impl MapUnit for HttpUnitTask {
     fn compute<'life0, 'async_trait>(
         &'life0 self,
-        row: Row,
+        frame: Frame,
         ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where

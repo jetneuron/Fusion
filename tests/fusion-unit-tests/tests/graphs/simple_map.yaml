@@ -46,12 +46,12 @@ units:
         local dates = generate_date_range(start_date, end_date)
 
         local idx = 0
-        local row = ctx:newRow()
+        local frame = ctx:newFrame()
         for _, date in ipairs(dates) do
-          row['date' .. idx] = date
+          frame['date' .. idx] = date
           idx = idx + 1
         end
-        ctx:send(row)
+        ctx:send(frame)
       $script_type: Lua
 
   - id: output

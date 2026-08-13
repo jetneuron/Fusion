@@ -40,7 +40,7 @@ use fusion_unit_sdk::config;
 use fusion_unit_sdk::graph::types::{
     ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext, UnitMeta,
 };
-use fusion_unit_sdk::proto::transfer::Row;
+use fusion_unit_sdk::proto::transfer::Frame;
 use fusion_unit_sdk::runtime::logical::LogicalTaskMeta;
 use fusion_unit_sdk::runtime::UnitResult;
 use fusion_unit_sdk::units::config_util::UnitConfigExt;
@@ -95,7 +95,7 @@ struct TableConfig {
 #[derive(Debug, Clone)]
 struct StreamTableConfig {
     name: String,   // table name in SQL
-    source: String, // upstream node ID (row.source)
+    source: String, // upstream node ID (frame.source)
 }
 
 const DEFAULT_ROW_THRESHOLD: usize = 80_000;
@@ -291,9 +291,9 @@ impl SqlUnitTask {
         Self::register_tables(df, &self.tables).await?;
 
         // Execute SQL and emit rows.
-        let rows = engine.query(&self.sql).await?;
-        for row in rows {
-            ctx.send(row).await;
+        let frames = engine.query(&self.sql).await?;
+        for frame in frames {
+            ctx.send(frame).await;
         }
         Ok(())
     }
@@ -319,7 +319,7 @@ impl SourceUnit for SqlUnitTask {
 impl MapUnit for SqlUnitTask {
     fn compute<'life0, 'async_trait>(
         &'life0 self,
-        row: Row,
+        frame: Frame,
         ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
@@ -327,7 +327,7 @@ impl MapUnit for SqlUnitTask {
         Self: 'async_trait,
     {
         let has_streams = !self.stream_tables.is_empty();
-        let source_idx = self.source_index.get(&row.source).copied();
+        let source_idx = self.source_index.get(&frame.source).copied();
         let providers = self.stream_providers.clone();
 
         Ok(async move {
@@ -344,7 +344,7 @@ impl MapUnit for SqlUnitTask {
 
             // Append to the per-source provider. Thread-safe — parallel
             // workers share one provider per source.
-            providers[idx].append(row);
+            providers[idx].append(frame);
             Ok(())
         })
     }
@@ -354,7 +354,7 @@ impl MapUnit for SqlUnitTask {
     /// SQL, emit results, and clean up temp files.
     fn on_eof<'life0, 'async_trait>(
         &'life0 self,
-        row: Row,
+        frame: Frame,
         ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where

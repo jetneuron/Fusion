@@ -10,8 +10,8 @@ use fusion_derive::LogicalTask;
 use fusion_unit_sdk::graph::types::{
     ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext, UnitConfig, UnitMeta,
 };
-use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
-use fusion_unit_sdk::row::types::ColumnDescriptor;
+use fusion_unit_sdk::proto::transfer::{Column, DataType, Frame};
+use fusion_unit_sdk::frame::types::ColumnDescriptor;
 use fusion_unit_sdk::runtime::logical::LogicalTaskMeta;
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use fusion_unit_sdk::units::config_util::UnitConfigExt;
@@ -26,7 +26,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
-// default row number to infer
+// default frame number to infer
 const DEFAULT_INFER_ROWS: usize = 20;
 
 #[unsafe(no_mangle)]
@@ -62,7 +62,7 @@ pub struct SpreadSheetUnitTask {
     skip_rows: Option<u64>,
     /// alias field names for table header
     field_names: Option<Vec<ColumnDescriptor>>,
-    /// alias field row
+    /// alias field frame
     field_name_row_index: Option<u64>,
     /// field types when specify `field_name_row_index`, default is `DataType::str`
     field_types: Option<Vec<DataType>>,
@@ -97,7 +97,7 @@ impl SpreadSheetUnitTask {
             self.field_names = Some(tmp_fields);
         });
     }
-    /// parse field names from excel by specified field name row index.
+    /// parse field names from excel by specified field name frame index.
     fn parse_field_names_from_excel(&mut self, c: UnitConfig) -> Result<(), UnitError> {
         let path = &self.path;
         self.field_name_row_index = c["field_name_row_index"]
@@ -177,19 +177,19 @@ impl SpreadSheetUnitTask {
         }
     }
 
-    /// build row data from excel data.
+    /// build frame data from excel data.
     fn build_row_data(
         auto_types: bool,
         field_names: &Vec<ColumnDescriptor>,
         row_data: &Vec<Data>,
-    ) -> Row {
-        let mut row: Row;
+    ) -> Frame {
+        let mut frame: Frame;
         if !auto_types && !field_names.is_empty() {
-            row = with_field_names(row_data, &field_names);
+            frame = with_field_names(row_data, &field_names);
         } else {
-            row = Row::default();
+            frame = Frame::default();
             for row_datum in row_data {
-                let column_idx = row.columns.len();
+                let column_idx = frame.columns.len();
                 let column_name = format!("c{}", column_idx);
                 let mut column = Column::default();
                 column.field = column_name;
@@ -208,10 +208,10 @@ impl SpreadSheetUnitTask {
                     }
                     _ => {}
                 }
-                row.columns.push(column);
+                frame.columns.push(column);
             }
         }
-        row
+        frame
     }
 }
 
@@ -263,7 +263,7 @@ impl InitUnit for SpreadSheetUnitTask {
 }
 
 impl SourceUnit for SpreadSheetUnitTask {
-    /// start to read excel file data. and emit row data one by one.
+    /// start to read excel file data. and emit frame data one by one.
     fn launch(
         &self,
         ctx: Arc<TaskContext>,
@@ -295,8 +295,8 @@ impl SourceUnit for SpreadSheetUnitTask {
                     index = index + 1;
 
                     let row_data: Vec<Data> = result.unwrap();
-                    let row = Self::build_row_data(auto_types, &field_names, &row_data);
-                    ctx.send(row).await;
+                    let frame = Self::build_row_data(auto_types, &field_names, &row_data);
+                    ctx.send(frame).await;
                 } else {
                     break;
                 }
@@ -309,7 +309,7 @@ impl SourceUnit for SpreadSheetUnitTask {
 impl MapUnit for SpreadSheetUnitTask {
     fn compute<'life0, 'async_trait>(
         &'life0 self,
-        row: Row,
+        frame: Frame,
         ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
@@ -321,7 +321,7 @@ impl MapUnit for SpreadSheetUnitTask {
             let sheet = workbook
                 .worksheet_from_name(&self.sheet_name)
                 .map_err(XlsxErrorWrapper)?;
-            if row.offset == 1 {
+            if frame.offset == 1 {
                 // Add a general heading format.
                 let header_format = Format::new()
                     .set_bold()
@@ -329,7 +329,7 @@ impl MapUnit for SpreadSheetUnitTask {
                     .set_align(FormatAlign::VerticalCenter)
                     .set_foreground_color(Color::RGB(0xD7E4BC))
                     .set_border(FormatBorder::Thin);
-                for (idx, column) in row.columns.iter().enumerate() {
+                for (idx, column) in frame.columns.iter().enumerate() {
                     sheet
                         .write_string_with_format(
                             0u32,
@@ -341,8 +341,8 @@ impl MapUnit for SpreadSheetUnitTask {
                 }
             }
 
-            let offset = row.offset as u32;
-            for (idx, column) in row.columns.iter().enumerate() {
+            let offset = frame.offset as u32;
+            for (idx, column) in frame.columns.iter().enumerate() {
                 let column_idx = idx as u16;
                 match column.dt.unwrap() {
                     DataType::unknown => sheet.write(offset, column_idx, None::<String>),
@@ -363,7 +363,7 @@ impl MapUnit for SpreadSheetUnitTask {
 
     fn on_eof<'life0, 'async_trait>(
         &'life0 self,
-        row: Row,
+        frame: Frame,
         ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where

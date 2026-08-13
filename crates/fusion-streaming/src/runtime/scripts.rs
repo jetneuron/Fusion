@@ -1,7 +1,7 @@
-use crate::runtime::core::{LuaContext, LuaRow};
+use crate::runtime::core::{LuaContext, LuaFrame};
 use fusion_derive::ScriptEngine;
 use fusion_unit_sdk::graph::types::{TaskContext, UnitIdx};
-use fusion_unit_sdk::proto::transfer::Row;
+use fusion_unit_sdk::proto::transfer::Frame;
 use fusion_unit_sdk::runtime::script::script_registry::{FACTORY_REGISTRATIONS, FactoryRegistrar};
 use fusion_unit_sdk::runtime::script::{ScriptContext, Scripter};
 use fusion_unit_sdk::runtime::script_engine_factory::ScriptEngineFactory;
@@ -64,12 +64,12 @@ impl Scripter for LuaScript {
         Box::pin(async move { Ok(String::default()) })
     }
 
-    fn row_eval<'life0, 'async_trait>(
+    fn frame_eval<'life0, 'async_trait>(
         &self,
         task_id: &UnitIdx,
         states: GraphStates,
         ctx: &TaskContext,
-        row: Row,
+        frame: Frame,
     ) -> Pin<Box<dyn Future<Output = UnitResult<()>> + Send>>
     where
         'life0: 'async_trait,
@@ -78,7 +78,7 @@ impl Scripter for LuaScript {
         let inner_states = self.states.clone();
         let scripts = self.inner.lines().collect::<Vec<&str>>().join("\n  ");
         let lua_ctx = LuaContext::wrap(ctx.clone());
-        let arc_row = Arc::new(Mutex::new(row));
+        let arc_row = Arc::new(Mutex::new(frame));
         // Scope name matches what init_script_env() / shutdown() use.
         let scope_name = task_id.to_string();
         // Per-worker Lua VM (parallelism > 1) or global GraphLua.
@@ -113,7 +113,7 @@ impl Scripter for LuaScript {
                 }
             };
 
-            let lua_row = LuaRow::wrap(arc_row).await;
+            let lua_row = LuaFrame::wrap(arc_row).await;
 
             // `this` is nil when no userdata injected (e.g. plain MapUnitTask).
             let this_val = scope_table

@@ -82,8 +82,8 @@ pub fn test_as_row() {
         JsonRowMapper::new("bazName".to_string(), Some("$.baz[*].name".to_string())),
     ];
     let rows = json.as_row(mappers).expect("err");
-    for row in rows.iter() {
-        println!("{}", row);
+    for frame in rows.iter() {
+        println!("{}", frame);
     }
 }
 
@@ -97,16 +97,16 @@ fn extract_nested_values(json: &Value, path: &str) -> Vec<HashMap<String, String
     for node in nodes {
         let data = node.to_data();
         if let Some(obj) = data.as_object() {
-            let mut row = HashMap::new();
+            let mut frame = HashMap::new();
             for (key, value) in obj.iter() {
-                row.insert(key.clone(), value.as_str().unwrap_or("?").to_string());
+                frame.insert(key.clone(), value.as_str().unwrap_or("?").to_string());
             }
-            results.push(row);
+            results.push(frame);
         } else {
             // 处理简单类型
-            let mut row = HashMap::new();
-            row.insert(path.to_string(), data.as_str().unwrap_or("?").to_string());
-            results.push(row);
+            let mut frame = HashMap::new();
+            frame.insert(path.to_string(), data.as_str().unwrap_or("?").to_string());
+            results.push(frame);
         }
     }
 
@@ -122,8 +122,8 @@ fn cartesian_product(
 ) {
     if depth == nested_data.len() {
         let mut merged = HashMap::new();
-        for row in current.iter() {
-            merged.extend(row.clone());
+        for frame in current.iter() {
+            merged.extend(frame.clone());
         }
         result.push(merged);
         return;
@@ -192,10 +192,10 @@ pub fn test() {
         .collect();
     println!("{}", headers.join("\t"));
 
-    for row in final_rows {
+    for frame in final_rows {
         let row_values: Vec<String> = headers
             .iter()
-            .map(|header| row.get(header).cloned().unwrap_or("".to_string()))
+            .map(|header| frame.get(header).cloned().unwrap_or("".to_string()))
             .collect();
         println!("{}", row_values.join("\t"));
     }

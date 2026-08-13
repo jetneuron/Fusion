@@ -3,9 +3,9 @@ use fusion_derive::LogicalTask;
 use fusion_unit_sdk::graph::types::{
     ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext, UnitMeta,
 };
-use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
-use fusion_unit_sdk::row::types::ColumnDescriptor;
-use fusion_unit_sdk::row::types::RAW_STR;
+use fusion_unit_sdk::proto::transfer::{Column, DataType, Frame};
+use fusion_unit_sdk::frame::types::ColumnDescriptor;
+use fusion_unit_sdk::frame::types::RAW_STR;
 use fusion_unit_sdk::runtime::logical::LogicalTaskMeta;
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
@@ -63,7 +63,7 @@ pub struct SSHUnitTask {
     separator: Option<String>,
     /// buffer size
     buffer_size: Option<usize>,
-    /// row count to sample.
+    /// frame count to sample.
     max_rows: Option<usize>,
 
     session: Option<Session>,
@@ -159,9 +159,9 @@ impl SourceUnit for SSHUnitTask {
         });
         Ok(async move {
             while let Some(line) = rx.recv().await {
-                let mut row = Row::new();
-                row_fn(&mut row, line);
-                ctx.send(row).await;
+                let mut frame = Frame::new();
+                row_fn(&mut frame, line);
+                ctx.send(frame).await;
             }
             Ok(())
         })
@@ -169,14 +169,14 @@ impl SourceUnit for SSHUnitTask {
 }
 
 impl SSHUnitTask {
-    fn generate_row_fn(&self) -> Box<dyn FnMut(&mut Row, String) + Send> {
-        let row_fn: Box<dyn FnMut(&mut Row, String) + Send> = match self.separator.clone() {
-            None => Box::new(move |row: &mut Row, line: String| {
-                row.mask = RAW_STR;
-                row.raw = line.as_bytes().to_vec();
+    fn generate_row_fn(&self) -> Box<dyn FnMut(&mut Frame, String) + Send> {
+        let row_fn: Box<dyn FnMut(&mut Frame, String) + Send> = match self.separator.clone() {
+            None => Box::new(move |frame: &mut Frame, line: String| {
+                frame.mask = RAW_STR;
+                frame.raw = line.as_bytes().to_vec();
             }),
             Some(separator) => match self.field_names.clone() {
-                None => Box::new(move |row: &mut Row, line: String| {
+                None => Box::new(move |frame: &mut Frame, line: String| {
                     let columns = line
                         .split(separator.as_str())
                         .enumerate()
@@ -188,9 +188,9 @@ impl SSHUnitTask {
                             c
                         })
                         .collect();
-                    row.columns = columns;
+                    frame.columns = columns;
                 }),
-                Some(fields) => Box::new(move |row: &mut Row, line: String| {
+                Some(fields) => Box::new(move |frame: &mut Frame, line: String| {
                     let columns = line
                         .split(&separator)
                         .collect::<Vec<&str>>()
@@ -203,7 +203,7 @@ impl SSHUnitTask {
                             column
                         })
                         .collect::<Vec<Column>>();
-                    row.columns = columns;
+                    frame.columns = columns;
                 }),
             },
         };
@@ -252,7 +252,7 @@ impl SSHUnitTask {
 impl MapUnit for SSHUnitTask {
     fn compute<'life0, 'async_trait>(
         &'life0 self,
-        row: Row,
+        frame: Frame,
         ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where

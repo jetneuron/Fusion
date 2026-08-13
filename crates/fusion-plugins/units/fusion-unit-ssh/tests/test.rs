@@ -73,12 +73,12 @@ async fn ssh_basic_test() {
     async move {
         let mut m = context.1;
         let mut idx = 0;
-        while let Some(row) = m.recv().await {
+        while let Some(frame) = m.recv().await {
             if idx == 0 {
-                row.display_column_names();
+                frame.display_column_names();
             }
             idx += 1;
-            println!("{}", row);
+            println!("{}", frame);
         }
     }
     .await;

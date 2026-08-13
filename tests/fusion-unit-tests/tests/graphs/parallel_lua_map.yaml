@@ -19,7 +19,7 @@ units:
       parallelism: 4
       $script: |
         local ctx, data, this = ...
-        local out = ctx:newRow()
+        local out = ctx:newFrame()
         out['c0'] = data['c0']
         out['c1'] = data['c1']
         out['doubled'] = data['c1'] * 2

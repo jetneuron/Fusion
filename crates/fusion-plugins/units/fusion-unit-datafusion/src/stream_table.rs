@@ -9,7 +9,7 @@
 //!   buffer exceeds the threshold; the directory is read back at scan.
 //!
 //! The unit holds [`StreamTableProvider`] refs and calls [`append`] per
-//! row (thread-safe via internal Mutex — parallel workers share one
+//! frame (thread-safe via internal Mutex — parallel workers share one
 //! provider per source). At EOF it calls [`finish`], then registers the
 //! provider with the DataFusion session and runs SQL.
 
@@ -29,7 +29,7 @@ use datafusion::physical_plan::execution_plan::{
 };
 use datafusion::physical_plan::memory::MemoryStream;
 use datafusion::physical_plan::{DisplayAs, DisplayFormatType, Partitioning};
-use fusion_unit_sdk::proto::transfer::Row;
+use fusion_unit_sdk::proto::transfer::Frame;
 use std::any::Any;
 use std::fmt;
 use std::fs::File;
@@ -183,11 +183,11 @@ fn read_parquet_batches(path: &str) -> Result<Vec<RecordBatch>, String> {
 
 pub struct StreamTableProvider {
     inner: Arc<Mutex<StreamTableInner>>,
-    /// In-memory row threshold before spilling. `usize::MAX` = pure memory.
+    /// In-memory frame threshold before spilling. `usize::MAX` = pure memory.
     threshold: usize,
     /// Spill directory (finite threshold only).
     data_dir: String,
-    /// Snapshot schema (set on first row).
+    /// Snapshot schema (set on first frame).
     schema: Mutex<Option<SchemaRef>>,
 }
 
@@ -234,13 +234,13 @@ impl StreamTableProvider {
         }
     }
 
-    /// Append a row (thread-safe — parallel workers share one provider).
-    pub fn append(&self, row: Row) {
-        // Infer schema from the first row.
+    /// Append a frame (thread-safe — parallel workers share one provider).
+    pub fn append(&self, frame: Frame) {
+        // Infer schema from the first frame.
         {
             let mut schema_guard = self.schema.lock().unwrap();
             if schema_guard.is_none() {
-                let fields: Vec<FieldRef> = row
+                let fields: Vec<FieldRef> = frame
                     .columns
                     .iter()
                     .map(|c| {
@@ -259,8 +259,8 @@ impl StreamTableProvider {
 
         let mut inner = self.inner.lock().unwrap();
 
-        // First row: allocate builders.
-        if inner.builders.is_empty() && !row.columns.is_empty() {
+        // First frame: allocate builders.
+        if inner.builders.is_empty() && !frame.columns.is_empty() {
             let schema = self.schema.lock().unwrap();
             let schema = schema.as_ref().unwrap();
             inner.builders = schema
@@ -270,7 +270,7 @@ impl StreamTableProvider {
                 .collect();
         }
 
-        for (i, col) in row.columns.iter().enumerate() {
+        for (i, col) in frame.columns.iter().enumerate() {
             if let Some(builder) = inner.builders.get_mut(i) {
                 let dt = {
                     let schema = self.schema.lock().unwrap();

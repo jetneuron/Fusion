@@ -1,5 +1,5 @@
 use crate::graph::types::{ComputingUnit, TaskContext};
-use crate::proto::transfer::Row;
+use crate::proto::transfer::Frame;
 use crate::runtime::UnitResult;
 use std::future::Future;
 use std::pin::Pin;
@@ -37,7 +37,7 @@ pub trait LogicalTask: LogicalTaskMeta {
     /// receive upstream data then emit to downstream after processed.
     fn internal_compute<'life0, 'async_trait>(
         &'life0 self,
-        row: *const Row,
+        frame: *const Frame,
         context: *const TaskContext,
     ) -> anyhow::Result<Pin<Box<dyn Future<Output = UnitResult<()>> + Send + 'async_trait>>>
     where
@@ -49,7 +49,7 @@ pub trait LogicalTask: LogicalTaskMeta {
         &'life0 self,
         event_type: i32,
         ctx: &'life0 TaskContext,
-        row: Row,
+        frame: Frame,
         args: Vec<&dyn std::any::Any>,
     ) -> Pin<Box<dyn Future<Output = UnitResult<()>> + Send + 'async_trait>>
     where

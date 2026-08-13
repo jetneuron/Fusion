@@ -1,37 +1,37 @@
 use std::fmt::Debug;
 
 use calamine::Data;
-use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
-use fusion_unit_sdk::row::types::ColumnDescriptor;
+use fusion_unit_sdk::proto::transfer::{Column, DataType, Frame};
+use fusion_unit_sdk::frame::types::ColumnDescriptor;
 use protobuf::EnumOrUnknown;
 
-/// indicate the `end of file` for row data.
-const ROW_MASK_EOF: u32 = 1 << 0;
-/// indicate the barrier of the row data.
-const ROW_MASK_BARRIER: u32 = 1 << 1;
+/// indicate the `end of file` for frame data.
+const FRAME_MASK_EOF: u32 = 1 << 0;
+/// indicate the barrier of the frame data.
+const FRAME_MASK_BARRIER: u32 = 1 << 1;
 /// indicate the task already signal.
-const ROW_MASK_READY_SIGNAL: u32 = 1 << 2;
+const FRAME_MASK_READY_SIGNAL: u32 = 1 << 2;
 /// watermark
 const WATERMARK: u32 = 1 << 3;
 
-/// we transform [DataType] to [Row]
+/// we transform [DataType] to [Frame]
 ///
 /// # Examples
 ///
 /// ```
 /// use calamine::{open_workbook, Reader, Xlsx};
-/// use fusion_unit_sdk::proto::transfer::Row;
+/// use fusion_unit_sdk::proto::transfer::Frame;
 /// let path = "<path_to_read>".to_string();
 /// let mut excel: Xlsx<_> = open_workbook(&path)?;
 ///
 /// if let Some(Ok(range)) = excel.worksheet_range("Sheet1") {
 ///     for columns in range.rows() {
-///         println!("{:?}", Row::from(columns));
+///         println!("{:?}", Frame::from(columns));
 ///     }
 /// }
 /// ```
-fn from(columns: Vec<Data>) -> Row {
-    let mut row = Row::default();
+fn from(columns: Vec<Data>) -> Frame {
+    let mut frame = Frame::default();
     for dt in columns {
         let mut column = Column::default();
         match dt {
@@ -46,15 +46,15 @@ fn from(columns: Vec<Data>) -> Row {
             }
             _ => {}
         }
-        row.columns.push(column);
+        frame.columns.push(column);
     }
-    row
+    frame
 }
 
-pub fn with_field_names(row_data: &Vec<Data>, field_names: &Vec<ColumnDescriptor>) -> Row {
-    let mut row: Row = Row::default();
+pub fn with_field_names(row_data: &Vec<Data>, field_names: &Vec<ColumnDescriptor>) -> Frame {
+    let mut frame: Frame = Frame::default();
     for row_datum in row_data {
-        let column_idx = row.columns.len();
+        let column_idx = frame.columns.len();
 
         let mut column = Column::default();
         if column_idx < field_names.len() {
@@ -154,7 +154,7 @@ pub fn with_field_names(row_data: &Vec<Data>, field_names: &Vec<ColumnDescriptor
                 }
             }
         }
-        row.columns.push(column);
+        frame.columns.push(column);
     }
-    row
+    frame
 }

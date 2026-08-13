@@ -1,4 +1,4 @@
-use crate::proto::transfer::Row;
+use crate::proto::transfer::Frame;
 use crate::runtime::logical::LogicalExecuteContext;
 use crate::runtime::state::GraphStates;
 use crate::runtime::UnitResult;
@@ -243,7 +243,7 @@ pub trait MapUnit: InitUnit {
     /// internal launch source to emit data.
     fn compute<'life0, 'async_trait>(
         &'life0 self,
-        row: Row,
+        frame: Frame,
         ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl Future<Output = UnitResult<()>> + Send>
     where
@@ -252,7 +252,7 @@ pub trait MapUnit: InitUnit {
     /// end of file.
     fn on_eof<'life0, 'async_trait>(
         &'life0 self,
-        row: Row,
+        frame: Frame,
         ctx: &'life0 TaskContext,
     ) -> anyhow::Result<impl std::future::Future<Output = UnitResult<()>> + Send>
     where
@@ -299,14 +299,14 @@ impl Watermark {
 #[derive(Clone)]
 pub struct BackpressureSender {
     id: String,
-    senders: Vec<tokio::sync::mpsc::Sender<Row>>,
+    senders: Vec<tokio::sync::mpsc::Sender<Frame>>,
     offset: Arc<std::sync::Mutex<u64>>,
-    /// Current barrier_ref — set by engine before compute, applied to every emitted row.
+    /// Current barrier_ref — set by engine before compute, applied to every emitted frame.
     barrier_ref: Arc<std::sync::Mutex<u64>>,
 }
 
 impl BackpressureSender {
-    pub fn new(id: String, senders: Vec<tokio::sync::mpsc::Sender<Row>>) -> Self {
+    pub fn new(id: String, senders: Vec<tokio::sync::mpsc::Sender<Frame>>) -> Self {
         BackpressureSender {
             id,
             senders,
@@ -322,24 +322,24 @@ impl BackpressureSender {
         *br = r;
     }
 
-    /// Return the current row offset count (for trace logging).
+    /// Return the current frame offset count (for trace logging).
     pub fn sent_count(&self) -> u64 {
         *self.offset.lock().unwrap()
     }
 
-    /// send row data.
+    /// send frame data.
     /// mpsc provides built-in backpressure: `tx.send().await` blocks when
     /// the channel buffer is full. No watermark polling needed.
-    pub async fn send(&self, mut row: Row) {
-        // Stamp source/offset/barrier_ref. Skip for barrier/eof rows —
+    pub async fn send(&self, mut frame: Frame) {
+        // Stamp source/offset/barrier_ref. Skip for barrier/eof frames —
         // barrier offsets must be preserved for fan-in group tracking.
-        if !row.is_barrier() && !row.is_eof() {
-            row.source = self.id.clone();
-            row.barrier_ref = {
+        if !frame.is_barrier() && !frame.is_eof() {
+            frame.source = self.id.clone();
+            frame.barrier_ref = {
                 let br = self.barrier_ref.lock().unwrap();
                 *br
             };
-            row.offset = {
+            frame.offset = {
                 let mut offset_val = self.offset.lock().unwrap();
                 *offset_val += 1;
                 *offset_val
@@ -354,7 +354,7 @@ impl BackpressureSender {
         let futures: Vec<_> = self
             .senders
             .iter()
-            .map(|tx| tx.send(row.clone()))
+            .map(|tx| tx.send(frame.clone()))
             .collect();
         for result in futures::future::join_all(futures).await {
             // downstream closed — ignore
@@ -366,7 +366,7 @@ impl BackpressureSender {
 impl TaskContext {
     pub fn new(
         unit: ComputingUnit,
-        senders: Vec<tokio::sync::mpsc::Sender<Row>>,
+        senders: Vec<tokio::sync::mpsc::Sender<Frame>>,
         states: GraphStates,
     ) -> Self {
         let id = unit.id.clone();
@@ -385,7 +385,7 @@ impl TaskContext {
         self
     }
 
-    pub async fn send(&self, row: Row) {
-        self.sender.send(row).await;
+    pub async fn send(&self, frame: Frame) {
+        self.sender.send(frame).await;
     }
 }

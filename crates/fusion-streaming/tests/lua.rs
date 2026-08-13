@@ -1,4 +1,4 @@
-use fusion_unit_sdk::proto::transfer::{Column, DataType, Row};
+use fusion_unit_sdk::proto::transfer::{Column, DataType, Frame};
 use mlua::{Function, Lua, Table};
 use protobuf::EnumOrUnknown;
 
@@ -15,7 +15,7 @@ async fn test_simple_lua() -> Result<(), Box<dyn std::error::Error>> {
         )
         .eval::<Function>()?;
 
-    let mut row = Row::new();
+    let mut frame = Frame::new();
     let mut c1 = Column::new();
     c1.field = "field1".to_string();
     c1.str_val = "foo01".to_string();
@@ -25,20 +25,20 @@ async fn test_simple_lua() -> Result<(), Box<dyn std::error::Error>> {
     c2.field = "field2".to_string();
     c2.f64_val = 5.321451;
     c2.dt = EnumOrUnknown::new(DataType::f64);
-    row.columns = vec![c1, c2];
+    frame.columns = vec![c1, c2];
 
     let mut t = lua.create_table()?;
-    for column in row.columns.clone() {
+    for column in frame.columns.clone() {
         if column.str_val.is_empty() {
             t.set(column.field, column.f64_val)?;
         } else {
             t.set(column.field, column.str_val)?;
         }
     }
-    let c = row.columns.get_mut(0).expect("");
+    let c = frame.columns.get_mut(0).expect("");
     c.str_val = func.call::<String>(t)?;
 
-    println!("{}", &row);
+    println!("{}", &frame);
     Ok(())
 }
 
@@ -58,16 +58,16 @@ async fn test_collect_data() -> Result<(), Box<dyn std::error::Error>> {
     let globals = lua.globals();
     globals.set("send", send_fn)?;
     let script = r#"
-    print(row.foo)
+    print(frame.foo)
     local data = {
-        f1 = row.foo,
-        f2 = tonumber(string.format("%.2f", row.bar + 1))
+        f1 = frame.foo,
+        f2 = tonumber(string.format("%.2f", frame.bar + 1))
     }
     send(data)
     "#;
     lua.load(format!(
         r#"
-    function _test_fn(row)
+    function _test_fn(frame)
       {}
     end
     "#,

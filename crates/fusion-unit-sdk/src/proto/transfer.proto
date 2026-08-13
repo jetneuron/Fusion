@@ -4,19 +4,22 @@ package transfer;
 option java_package = "com.fusionpro.proto";
 
 /**
- * Row that represent data, including one or more columns, which can represent a data set.
+ * Frame — a unit of streaming data. Either a structured frame with one
+ * or more columns (representing a row of a data set), or raw bytes via
+ * the `raw` field. Generalized beyond "row" so byte-stream payloads
+ * can flow through the same channel in the future.
  */
-message Row {
+message Frame {
   /**
    * data offset
    */
   uint64 offset = 1;
   /**
-   * include all columns in row data.
+   * include all columns in frame data.
    */
   repeated Column columns = 2;
   /**
-   * mask value which can indicate the special row data. eg: barrier, EOF and so on.
+   * mask value which can indicate the special frame data. eg: barrier, EOF and so on.
    */
   uint32 mask = 3;
   /**
@@ -24,12 +27,13 @@ message Row {
    */
   string source = 4;
   /**
-   * raw data
+   * raw bytes payload — used when the frame carries a byte stream
+   * instead of structured columns.
    */
   bytes raw = 5;
   /**
-   * barrier reference offset — groups data rows from fan-out paths
-   * back to the originating row for barrier-based synchronization.
+   * barrier reference offset — groups data frames from fan-out paths
+   * back to the originating frame for barrier-based synchronization.
    */
   uint64 barrier_ref = 6;
 }
@@ -47,7 +51,7 @@ enum DataType {
   unknown = 8;
 }
 
-// Column struct in each row.
+// Column struct in each structured frame.
 message Column {
   uint32 index = 1;
   string field = 2;
