@@ -357,8 +357,12 @@ impl BackpressureSender {
             .map(|tx| tx.send(frame.clone()))
             .collect();
         for result in futures::future::join_all(futures).await {
-            // downstream closed — ignore
-            let _ = result;
+            // Downstream closed is a real signal — surface it instead of
+            // silently dropping frames (silent drops made frame loss
+            // untraceable in dylib deployments).
+            if let Err(e) = result {
+                warn!("frame lost on channel from `{}`: {e}", self.id);
+            }
         }
     }
 }
