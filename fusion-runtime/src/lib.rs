@@ -414,9 +414,20 @@ impl GraphExecutor {
     ) -> String {
         let graph: LogicalGraph = source.into();
         let graph_id = graph.get_id();
+        log::info!("GraphExecutor: submit graph `{graph_id}`");
         let runtime = self.runtime.clone();
+        let gid = graph_id.clone();
         let handle = tokio::spawn(async move {
-            runtime.execute(graph, env).await
+            log::info!("GraphExecutor: executing graph `{gid}`");
+            let result = runtime.execute(graph, env).await;
+            log::info!(
+                "GraphExecutor: graph `{gid}` finished: {}",
+                match &result {
+                    Ok(()) => "ok".to_string(),
+                    Err(e) => format!("{e:?}"),
+                }
+            );
+            result
         });
         self.tasks.lock().await.insert(graph_id.clone(), handle);
         graph_id

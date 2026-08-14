@@ -36,9 +36,6 @@ impl GraphUnitPlugin for UniversalFsUnitPlugin {
 
         unit_manifest
     }
-    fn plugin_version(&self) -> &str {
-        "1.0.0"
-    }
 }
 
 pub type BoxedUniversalIO =

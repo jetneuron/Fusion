@@ -36,3 +36,5 @@ app/assets/libs/capability/lib*
 app/assets/libs/unit/lib*
 
 tmp
+app/dist
+app/src-tauri/assets

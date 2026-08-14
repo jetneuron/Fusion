@@ -49,9 +49,11 @@ async fn execute_with_datafusion(graph: &str) -> anyhow::Result<()> {
         "CARGO_MANIFEST_DIR": env!("CARGO_MANIFEST_DIR"),
     })));
 
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("error"))
+    // try_init: tests run in parallel — the first init wins, later
+    // ones no-op instead of panicking (init() would SetLoggerError).
+    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("error"))
         .filter_module("fusion", log::LevelFilter::Trace)
-        .init();
+        .try_init();
 
     let plugin_manager = PluginManager::new().await;
     plugin_manager

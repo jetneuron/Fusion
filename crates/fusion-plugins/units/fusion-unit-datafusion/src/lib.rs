@@ -33,9 +33,9 @@ pub mod providers;
 pub mod stream_table;
 
 use std::collections::HashMap;
-use fusion_capability_datafusion::DataFusionCapability;
+use fusion_capability_datafusion::{DataFusionCapability, DataFusionCapabilityPlugin};
 use fusion_derive::LogicalTask;
-use fusion_unit_sdk::capability::CapabilitySqlEngine;
+use fusion_unit_sdk::capability::{CapabilityPlugin, CapabilitySqlEngine};
 use fusion_unit_sdk::config;
 use fusion_unit_sdk::graph::types::{
     ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext, UnitMeta,
@@ -45,6 +45,7 @@ use fusion_unit_sdk::runtime::logical::LogicalTaskMeta;
 use fusion_unit_sdk::runtime::UnitResult;
 use fusion_unit_sdk::units::config_util::UnitConfigExt;
 use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
+use serde_json::json;
 use std::future::Future;
 use std::sync::Arc;
 
@@ -52,8 +53,19 @@ use std::sync::Arc;
 // Plugin
 // ============================================================
 
+#[cfg(feature = "cdylib")]
 #[unsafe(no_mangle)]
 pub extern "C" fn init_plugin() -> Box<dyn GraphUnitPlugin> {
+    // Per-binary isolation: the config and capability registries are
+    // statics inside this dylib's binary image. Entries the app loaded
+    // (from fusion-conf-app.yaml) and capabilities registered from
+    // other dylibs are invisible here, so the SQL engine and its
+    // datasource entry must be registered within this unit dylib —
+    // the same binary image SqlUnitTask queries.
+    DataFusionCapabilityPlugin.register();
+    config::register(|reg| {
+        reg.insert("datasource", "datafusion", "datafusion", json!({}));
+    });
     Box::new(SqlUnitPlugin {})
 }
 
@@ -65,9 +77,6 @@ impl GraphUnitPlugin for SqlUnitPlugin {
         let mut m = UnitManifest::default();
         SqlUnitTask::register_unit(&mut m, &self.plugin_version());
         m
-    }
-    fn plugin_version(&self) -> &str {
-        "1.0.0"
     }
 }
 

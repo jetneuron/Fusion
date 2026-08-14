@@ -19,7 +19,8 @@ use fusion_unit_sdk::proto::transfer::{Column, DataType, Frame};
 use fusion_unit_sdk::runtime::UnitResult;
 use protobuf::EnumOrUnknown;
 use log;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use tokio::runtime::Runtime;
 use tokio::sync::Mutex;
 
 // ============================================================
@@ -34,15 +35,29 @@ use tokio::sync::Mutex;
 pub struct DataFusionCapability {
     /// The DataFusion session — `Mutex` because `SessionContext`
     /// methods take `&self` but may not be thread-safe internally.
-    pub ctx: Mutex<SessionContext>,
+    /// `Arc` so query can hand the lock across the dylib's own runtime.
+    pub ctx: Arc<Mutex<SessionContext>>,
 }
 
 impl DataFusionCapability {
     pub fn new() -> Self {
         Self {
-            ctx: Mutex::new(SessionContext::new()),
+            ctx: Arc::new(Mutex::new(SessionContext::new())),
         }
     }
+}
+
+/// DataFusion execution plans spawn onto tokio internally (e.g.
+/// `RepartitionExec`). A dylib links its own tokio, whose thread-local
+/// runtime context is empty on the host runtime's threads — TLS is per
+/// binary image — so `collect()` must run on this crate's own runtime
+/// to guarantee a reactor exists.
+static DF_RUNTIME: OnceLock<Runtime> = OnceLock::new();
+
+fn df_runtime() -> &'static Runtime {
+    DF_RUNTIME.get_or_init(|| {
+        Runtime::new().expect("failed to create DataFusion tokio runtime")
+    })
 }
 
 // ============================================================
@@ -71,91 +86,106 @@ impl Capability for DataFusionCapability {
 #[async_trait::async_trait]
 impl CapabilitySqlEngine for DataFusionCapability {
     async fn query(&self, sql: &str) -> UnitResult<Vec<Frame>> {
-        let ctx = self.ctx.lock().await;
-        let df = match ctx.sql(sql).await {
-            Ok(df) => df,
-            Err(e) => {
-                log::error!("[DataFusion] SQL planning error for `{sql}`: {e}");
-                return Err(fusion_unit_sdk::runtime::UnitError::unknown(e.to_string()));
-            }
-        };
-        let batches = match df.collect().await {
-            Ok(b) => b,
-            Err(e) => {
-                log::error!("[DataFusion] SQL execution error for `{sql}`: {e}");
-                return Err(fusion_unit_sdk::runtime::UnitError::unknown(e.to_string()));
-            }
-        };
-
-        let mut rows = Vec::new();
-        for batch in &batches {
-            let schema = batch.schema();
-            for row_idx in 0..batch.num_rows() {
-                let mut frame = Frame::new();
-                for (col_idx, field) in schema.fields().iter().enumerate() {
-                    let column = batch.column(col_idx);
-                    let mut c = Column::new();
-                    c.field = field.name().clone();
-                    match field.data_type() {
-                        datafusion::arrow::datatypes::DataType::Int32 => {
-                            let arr = column
-                                .as_any()
-                                .downcast_ref::<datafusion::arrow::array::Int32Array>()
-                                .unwrap();
-                            c.i32_val = arr.value(row_idx);
-                            c.dt = EnumOrUnknown::from(DataType::i32);
-                        }
-                        datafusion::arrow::datatypes::DataType::Int64 => {
-                            let arr = column
-                                .as_any()
-                                .downcast_ref::<datafusion::arrow::array::Int64Array>()
-                                .unwrap();
-                            c.i64_val = arr.value(row_idx);
-                            c.dt = EnumOrUnknown::from(DataType::i64);
-                        }
-                        datafusion::arrow::datatypes::DataType::Float32 => {
-                            let arr = column
-                                .as_any()
-                                .downcast_ref::<datafusion::arrow::array::Float32Array>()
-                                .unwrap();
-                            c.f32_val = arr.value(row_idx);
-                            c.dt = EnumOrUnknown::from(DataType::f32);
-                        }
-                        datafusion::arrow::datatypes::DataType::Float64 => {
-                            let arr = column
-                                .as_any()
-                                .downcast_ref::<datafusion::arrow::array::Float64Array>()
-                                .unwrap();
-                            c.f64_val = arr.value(row_idx);
-                            c.dt = EnumOrUnknown::from(DataType::f64);
-                        }
-                        datafusion::arrow::datatypes::DataType::Utf8 => {
-                            let arr = column
-                                .as_any()
-                                .downcast_ref::<datafusion::arrow::array::StringArray>()
-                                .unwrap();
-                            c.str_val = arr.value(row_idx).to_string();
-                            c.dt = EnumOrUnknown::from(DataType::str);
-                        }
-                        datafusion::arrow::datatypes::DataType::Boolean => {
-                            let arr = column
-                                .as_any()
-                                .downcast_ref::<datafusion::arrow::array::BooleanArray>()
-                                .unwrap();
-                            c.bool_val = arr.value(row_idx);
-                            c.dt = EnumOrUnknown::from(DataType::bool);
-                        }
-                        _ => {
-                            c.str_val = format!("{:?}", column);
-                            c.dt = EnumOrUnknown::from(DataType::str);
-                        }
+        let sql = sql.to_string();
+        let ctx = self.ctx.clone();
+        // `collect()` spawns DataFusion's internal tasks (repartition,
+        // hash join) onto tokio. Run it on this dylib's own runtime —
+        // on the host runtime's threads this crate's tokio has no
+        // reactor ("there is no reactor running").
+        df_runtime()
+            .spawn(async move {
+                let ctx = ctx.lock().await;
+                let df = match ctx.sql(&sql).await {
+                    Ok(df) => df,
+                    Err(e) => {
+                        log::error!("[DataFusion] SQL planning error for `{sql}`: {e}");
+                        return Err(fusion_unit_sdk::runtime::UnitError::unknown(e.to_string()));
                     }
-                    frame.columns.push(c);
+                };
+                let batches = match df.collect().await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        log::error!("[DataFusion] SQL execution error for `{sql}`: {e}");
+                        return Err(fusion_unit_sdk::runtime::UnitError::unknown(e.to_string()));
+                    }
+                };
+
+                let mut rows = Vec::new();
+                for batch in &batches {
+                    let schema = batch.schema();
+                    for row_idx in 0..batch.num_rows() {
+                        let mut frame = Frame::new();
+                        for (col_idx, field) in schema.fields().iter().enumerate() {
+                            let column = batch.column(col_idx);
+                            let mut c = Column::new();
+                            c.field = field.name().clone();
+                            match field.data_type() {
+                                datafusion::arrow::datatypes::DataType::Int32 => {
+                                    let arr = column
+                                        .as_any()
+                                        .downcast_ref::<datafusion::arrow::array::Int32Array>()
+                                        .unwrap();
+                                    c.i32_val = arr.value(row_idx);
+                                    c.dt = EnumOrUnknown::from(DataType::i32);
+                                }
+                                datafusion::arrow::datatypes::DataType::Int64 => {
+                                    let arr = column
+                                        .as_any()
+                                        .downcast_ref::<datafusion::arrow::array::Int64Array>()
+                                        .unwrap();
+                                    c.i64_val = arr.value(row_idx);
+                                    c.dt = EnumOrUnknown::from(DataType::i64);
+                                }
+                                datafusion::arrow::datatypes::DataType::Float32 => {
+                                    let arr = column
+                                        .as_any()
+                                        .downcast_ref::<datafusion::arrow::array::Float32Array>()
+                                        .unwrap();
+                                    c.f32_val = arr.value(row_idx);
+                                    c.dt = EnumOrUnknown::from(DataType::f32);
+                                }
+                                datafusion::arrow::datatypes::DataType::Float64 => {
+                                    let arr = column
+                                        .as_any()
+                                        .downcast_ref::<datafusion::arrow::array::Float64Array>()
+                                        .unwrap();
+                                    c.f64_val = arr.value(row_idx);
+                                    c.dt = EnumOrUnknown::from(DataType::f64);
+                                }
+                                datafusion::arrow::datatypes::DataType::Utf8 => {
+                                    let arr = column
+                                        .as_any()
+                                        .downcast_ref::<datafusion::arrow::array::StringArray>()
+                                        .unwrap();
+                                    c.str_val = arr.value(row_idx).to_string();
+                                    c.dt = EnumOrUnknown::from(DataType::str);
+                                }
+                                datafusion::arrow::datatypes::DataType::Boolean => {
+                                    let arr = column
+                                        .as_any()
+                                        .downcast_ref::<datafusion::arrow::array::BooleanArray>()
+                                        .unwrap();
+                                    c.bool_val = arr.value(row_idx);
+                                    c.dt = EnumOrUnknown::from(DataType::bool);
+                                }
+                                _ => {
+                                    c.str_val = format!("{:?}", column);
+                                    c.dt = EnumOrUnknown::from(DataType::str);
+                                }
+                            }
+                            frame.columns.push(c);
+                        }
+                        rows.push(frame);
+                    }
                 }
-                rows.push(frame);
-            }
-        }
-        Ok(rows)
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| {
+                fusion_unit_sdk::runtime::UnitError::unknown(format!(
+                    "datafusion query task failed: {e}"
+                ))
+            })?
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -187,6 +217,7 @@ impl CapabilityPlugin for DataFusionCapabilityPlugin {
 // FFI export
 // ============================================================
 
+#[cfg(feature = "cdylib")]
 #[unsafe(no_mangle)]
 pub extern "C" fn init_capability_plugin() -> Box<dyn CapabilityPlugin + Send + Sync> {
     Box::new(DataFusionCapabilityPlugin)

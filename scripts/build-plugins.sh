@@ -171,38 +171,31 @@ if [[ ${#ALL_CRATES[@]} -eq 0 ]]; then
     exit 0
 fi
 
-# Build all plugin crates in a single cargo invocation for
-# shared incremental compilation. Filter output to show per-crate
-# progress without drowning in warnings.
+# Build each plugin crate in its own cargo invocation. A single
+# invocation with multiple `-p` unifies features across the selected
+# packages: `-p fusion-unit-datafusion` enables its default `cdylib`
+# feature, and that union leaks into crates that depend on it with
+# `default-features = false` (e.g. provider dylibs) — their binary
+# images would accidentally export `init_plugin` / `init_capability_plugin`
+# and override the unit registration at load time. Per-crate invocations
+# respect each crate's own declared features; cargo still shares
+# incremental artifacts in the target dir.
 echo ""
 echo "Building ${#ALL_CRATES[@]} plugin crate(s)..."
 
-CARGO_ARGS=()
 for crate in "${ALL_CRATES[@]}"; do
-    CARGO_ARGS+=(-p "$crate")
+    if [[ "$VERBOSE" == true ]]; then
+        cargo build -p "$crate" $CARGO_FLAGS 2>&1 || exit 1
+    else
+        # Filter output to show per-crate progress without drowning
+        # in warnings. pipefail surfaces cargo's exit code; grep's own
+        # non-zero (no matching lines) is harmless here — a successful
+        # build always prints at least "Finished".
+        cargo build -p "$crate" $CARGO_FLAGS 2>&1 \
+            | grep --line-buffered -E '^\s*(Compiling|Building|Finished|error(\[|:))' \
+            || exit 1
+    fi
 done
-
-if [[ "$VERBOSE" == true ]]; then
-    cargo build "${CARGO_ARGS[@]}" $CARGO_FLAGS 2>&1
-else
-    cargo build "${CARGO_ARGS[@]}" $CARGO_FLAGS 2>&1 \
-        | grep --line-buffered -E '^\s*(Compiling|Building|Finished|error(\[|:))' \
-        | while IFS= read -r line; do
-            if echo "$line" | grep -qE '^error'; then
-                echo "  $line" >&2
-            else
-                echo "  $line"
-            fi
-        done
-fi
-
-# Check build status (pipe hides the exit code, use set -o pipefail if bash).
-BUILD_EXIT="${PIPESTATUS[0]:-0}"
-if [[ "$BUILD_EXIT" -ne 0 ]]; then
-    echo ""
-    echo "Build failed (exit $BUILD_EXIT). Fix errors above and retry."
-    exit $BUILD_EXIT
-fi
 
 echo ""
 echo "All crates built."
@@ -226,7 +219,15 @@ copy_dylib() {
 
     if [[ -f "$src" ]]; then
         mkdir -p "$target_dir"
-        cp "$src" "$target_dir/"
+        # Strip local symbols + debug info at copy time — a debug build
+        # carries ~150MB of symbol table (e.g. 405k local symbols) even
+        # though the app only calls the FFI exports at runtime. The
+        # unstripped copy stays in target/ for debugging.
+        if [[ "$PLATFORM_EXT" != "dll" ]]; then
+            strip -x "$src" -o "$target_dir/lib${lib_name}.${PLATFORM_EXT}"
+        else
+            cp "$src" "$target_dir/"
+        fi
         echo "  $crate_name → $target_dir/"
     else
         echo "  [WARN] $crate_name: dylib not found at $src (crate-type may be missing cdylib)"

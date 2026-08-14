@@ -53,8 +53,20 @@ impl PluginManager {
         let dylib_path = path;
         let mut plugin = unsafe {
             let lib = Library::new(dylib_path).expect("Failed to load library");
+            // The unit lib dir may contain non-unit dylibs — e.g.
+            // provider-only crates like `fusion-unit-datafusion-sqlite`
+            // export `init_provider_plugin` but no `init_plugin`. A
+            // missing symbol means "not a unit plugin"; skip it instead
+            // of panicking (its registration would also override the
+            // real unit plugin from the same dir).
             let init_plugin: Symbol<unsafe fn() -> Box<dyn GraphUnitPlugin + Send + Sync>> =
-                lib.get(b"init_plugin").expect("Failed to load symbol");
+                match lib.get(b"init_plugin") {
+                    Ok(f) => f,
+                    Err(_) => {
+                        log::info!("Skipping `{path}`: no `init_plugin` symbol (provider dylib?)");
+                        return;
+                    }
+                };
             init_plugin()
         };
         let manifest = plugin.register_units();

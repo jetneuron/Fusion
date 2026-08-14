@@ -20,10 +20,6 @@ impl GraphUnitPlugin for NetUnitPlugin {
         HttpEndpointUnitTask::register_unit(&mut unit_manifest, &self.plugin_version());
         unit_manifest
     }
-
-    fn plugin_version(&self) -> &str {
-        "1.0.0"
-    }
 }
 
 #[derive(Default, SrcLogicTask)]

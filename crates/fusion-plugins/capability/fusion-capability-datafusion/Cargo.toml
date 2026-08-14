@@ -8,10 +8,17 @@ edition.workspace = true
 [lib]
 crate-type = ["cdylib", "lib"]
 
+# `cdylib` gates the `no_mangle` FFI export. Crates that depend on this
+# library (e.g. unit plugins reusing the SQL engine type) disable it so
+# their own dylibs don't accidentally export this capability plugin.
+[features]
+default = ["cdylib"]
+cdylib = []
+
 [dependencies]
 fusion-unit-sdk = { path = "../../../fusion-unit-sdk" }
 datafusion = { version = "=54.1.0", default-features = false, features = ["sql"] }
-tokio = { version = "1.48.0", features = ["sync", "rt"] }
+tokio = { version = "1.48.0", features = ["sync", "rt", "rt-multi-thread"] }
 async-trait = "0.1.83"
 anyhow = "1.0.100"
 protobuf = "3.7.1"

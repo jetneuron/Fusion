@@ -33,9 +33,6 @@ impl GraphUnitPlugin for SSHUnitPlugin {
         unit_manifest
     }
 
-    fn plugin_version(&self) -> &str {
-        "1.0.0"
-    }
 }
 
 #[derive(Default, LogicalTask)]
