@@ -19,6 +19,14 @@ config:
         port: 6379
         db: 0
         pool_size: 8
+    sqlite:
+      # Referenced from graph YAML as `tables[*].provider: sqlite` with a
+      # matching `config_id`. The path is relative to the app working
+      # directory (dev: app/); packaged apps should point at a bundled
+      # database resource.
+      sqlite-test-db:
+        path: /Users/nigel/Workspace/code/nigel/Fusion/tests/fusion-unit-tests/tests/data/test_datafusion.db
+        table: users
   setting:
     pool:
       default:

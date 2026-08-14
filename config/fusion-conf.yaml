@@ -32,6 +32,13 @@ config:
         database: analytics
         user: ${PG_USER}
         password: ${PG_PWD}
+    sqlite:
+      # Referenced from graph YAML as `tables[*].provider: sqlite` with a
+      # matching `config_id`. Example pointing at the integration-test
+      # database; replace with a production path.
+      sqlite-test-db:
+        path: tests/fusion-unit-tests/tests/data/test_datafusion.db
+        table: employees
   setting:
     pool:
       default:
