@@ -26,7 +26,7 @@ Cargo.lock
 .idea
 
 # unit test case output resource
-crates/fusion-unit-tests/tests/output
+tests/fusion-unit-tests/tests/output/*
 
 app/yarn.lock
 app/.yarn/**

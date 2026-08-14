@@ -254,9 +254,13 @@ impl FusionRuntimeBuilder {
     ///
     /// 1. Create [`PluginManager`].
     /// 2. Register statically-linked unit plugins.
-    /// 3. Auto-scan config lib directories (if config was provided).
-    /// 4. Load capability dylibs.
-    /// 5. Load unit dylibs.
+    /// 3. Populate the process-global config registry from the YAML
+    ///    `config:` section (also injected into unit/provider dylibs).
+    /// 4. Auto-scan config lib directories (if config was provided).
+    /// 5. Load capability dylibs (collects the SQL engine factory).
+    /// 6. Load provider dylibs (collects table providers) — before units,
+    ///    because unit dylibs receive the collected providers.
+    /// 7. Load unit dylibs (injected with config + factory + providers).
     ///
     /// Script engines are created per graph execution (see
     /// [`FusionRuntime::execute`]), not at build time.
@@ -271,16 +275,52 @@ impl FusionRuntimeBuilder {
             log::info!("Registered unit plugin `{name}`");
         }
 
-        // 3. Auto-scan config lib dirs for dynamic plugins.
+        // 3. Populate the config registry from the YAML `config:` section.
+        if let Some(config_value) = self
+            .config
+            .as_ref()
+            .and_then(|cfg| cfg.config.as_ref())
+            .and_then(|c| c.as_object())
+        {
+            fusion_unit_sdk::config::register(|reg| {
+                for (category, types) in config_value {
+                    let Some(types) = types.as_object() else {
+                        continue;
+                    };
+                    for (config_type, ids) in types {
+                        let Some(ids) = ids.as_object() else {
+                            continue;
+                        };
+                        for (id, data) in ids {
+                            reg.insert(
+                                category.clone(),
+                                config_type.clone(),
+                                id.clone(),
+                                data.clone(),
+                            );
+                        }
+                    }
+                }
+            });
+            log::info!("Populated config registry from YAML `config:` section");
+        }
+
+        // 4. Auto-scan config lib dirs for dynamic plugins.
         self = self.scan_config_libs();
 
-        // 4. Capability plugins (dylib).
+        // 5. Capability plugins (dylib).
         for path in &self.capability_paths {
             plugin_manager.load_capability_plugin(path).await?;
             log::info!("Loaded capability plugin: {path}");
         }
 
-        // 5. Unit plugins (dylib).
+        // 6. Provider plugins (dylib) — must precede unit dylibs so their
+        // providers can be injected into the units.
+        for path in &self.plugin_paths {
+            plugin_manager.load_provider_plugin(path).await?;
+        }
+
+        // 7. Unit plugins (dylib).
         for path in &self.plugin_paths {
             plugin_manager.register_plugin(path).await;
             log::info!("Loaded unit plugin: {path}");

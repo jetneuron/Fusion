@@ -240,3 +240,29 @@ pub fn read() -> parking_lot::RwLockReadGuard<'static, ConfigRegistry> {
 pub fn write() -> parking_lot::RwLockWriteGuard<'static, ConfigRegistry> {
     registry().write()
 }
+
+// ============================================================
+// FFI injection (host → dylib)
+// ============================================================
+
+/// One config registry entry serialized across a binary-image boundary.
+///
+/// Rust statics are per-binary-image: entries registered in the host
+/// process are invisible to unit/provider dylibs. The host serializes
+/// its registry as `Vec<InjectedConfig>` JSON and hands it to dylibs
+/// through a `set_config` C symbol, which calls [`inject_entries`].
+#[derive(Debug, Clone, serde_derive::Serialize, serde_derive::Deserialize)]
+pub struct InjectedConfig {
+    pub category: String,
+    pub config_type: String,
+    pub id: String,
+    pub data: serde_json::Value,
+}
+
+/// Install config entries injected from the host (another binary image).
+pub fn inject_entries(entries: Vec<InjectedConfig>) {
+    let mut reg = registry().write();
+    for e in entries {
+        reg.insert(e.category, e.config_type, e.id, e.data);
+    }
+}

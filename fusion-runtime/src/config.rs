@@ -21,6 +21,15 @@ pub struct FusionConfig {
     /// Dynamic library search paths.
     #[serde(default)]
     pub libs: LibPathsConfig,
+
+    /// Config registry entries, three-level hierarchy
+    /// `category → config_type → instance_id → data`.
+    ///
+    /// Populated into the process-global `config` registry at build time
+    /// (and injected into unit/provider dylibs, whose registries are
+    /// separate binary images).
+    #[serde(default)]
+    pub config: Option<serde_json::Value>,
 }
 
 /// Execution mode.

@@ -9,12 +9,11 @@ edition.workspace = true
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-# default-features = false: this is a provider dylib, not a unit dylib —
-# don't pull the `no_mangle` FFI exports into this binary image.
-fusion-unit-datafusion = { path = "../../", default-features = false }
+# Provider dylib: no DataFusion, no engine types. Rows cross the dylib
+# boundary as SDK `Frame` protobufs — see fusion-unit-sdk `providers`.
 fusion-unit-sdk = { path = "../../../../../../crates/fusion-unit-sdk" }
-datafusion = { version = "=54.1.0", default-features = false, features = ["sql"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 async-trait = "0.1.83"
-anyhow = "1.0.100"
-tokio = { version = "1.48.0", features = ["full"] }
+protobuf = "3.7"
+serde_json = "1.0"
+log = "0.4"

@@ -5,6 +5,7 @@ use fusion_streaming::runtime::sandbox::SandboxRuntime;
 use fusion_streaming::runtime::GraphRuntime;
 use fusion_unit_sdk::capability::{self, CapabilityPlugin};
 use fusion_unit_sdk::config;
+use fusion_unit_sdk::providers::ProviderPlugin;
 
 use crate::TestPlugin;
 use serde_json::json;
@@ -35,10 +36,8 @@ async fn execute_with_datafusion(graph: &str) -> anyhow::Result<()> {
         );
     });
 
-    // Register built-in CSV/TSV table providers.
-    fusion_unit_datafusion::providers::csv::register_csv_providers();
-
-    // Register DataFusion capability factory.
+    // Register DataFusion capability factory (static in-process mode —
+    // dylib deployments inject the engine via set_sql_engine_factory).
     let df_plugin = DataFusionCapabilityPlugin;
     df_plugin.register();
 
@@ -81,11 +80,8 @@ async fn test_datafusion_csv_source() -> anyhow::Result<()> {
 /// Source → SqlUnitTask (SQLite via DataFusion) → DebugOutput.
 #[tokio::test]
 async fn test_datafusion_sqlite_source() -> anyhow::Result<()> {
-    // Register SQLite table provider.
-    use fusion_unit_datafusion::providers::ProviderPlugin;
-    fusion_unit_datafusion_sqlite::SqliteProviderPlugin.register();
-
-    // Config entry for the SQLite db file.
+    // Config entry for the SQLite db file (must precede
+    // register_providers — the provider reads it).
     config::register(|reg| {
         reg.insert(
             "datasource",
@@ -101,6 +97,11 @@ async fn test_datafusion_sqlite_source() -> anyhow::Result<()> {
         );
     });
 
+    // Collect SQLite providers and inject into the unit (static mode).
+    let providers =
+        fusion_unit_datafusion_sqlite::SqliteProviderPlugin.register_providers();
+    fusion_unit_datafusion::inject_providers(providers);
+
     execute_with_datafusion("datafusion_sqlite_source.yaml").await?;
     Ok(())
 }
@@ -110,9 +111,6 @@ async fn test_datafusion_sqlite_source() -> anyhow::Result<()> {
 /// multi-type column output.
 #[tokio::test]
 async fn test_datafusion_sqlite_aggregation() -> anyhow::Result<()> {
-    use fusion_unit_datafusion::providers::ProviderPlugin;
-    fusion_unit_datafusion_sqlite::SqliteProviderPlugin.register();
-
     config::register(|reg| {
         reg.insert(
             "datasource",
@@ -127,6 +125,11 @@ async fn test_datafusion_sqlite_aggregation() -> anyhow::Result<()> {
             }),
         );
     });
+
+    // Collect SQLite providers and inject into the unit (static mode).
+    let providers =
+        fusion_unit_datafusion_sqlite::SqliteProviderPlugin.register_providers();
+    fusion_unit_datafusion::inject_providers(providers);
 
     execute_with_datafusion("datafusion_sqlite_aggr.yaml").await
 }

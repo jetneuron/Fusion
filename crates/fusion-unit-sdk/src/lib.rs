@@ -10,7 +10,9 @@ pub mod error;
 pub mod graph;
 pub mod proto;
 pub mod frame;
+pub mod providers;
 pub mod runtime;
+pub mod sql_engine_ffi;
 pub mod units;
 
 #[derive(Default, Clone)]

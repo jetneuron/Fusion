@@ -17,18 +17,12 @@ cdylib = []
 
 [dependencies]
 fusion-derive = { path = "../../../fusion-derive" }
-fusion-streaming = { path = "../../../fusion-streaming" }
 fusion-unit-sdk = { path = "../../../fusion-unit-sdk" }
-# default-features = false: the unit dylib only needs the SQL engine
-# type and its register() logic — never the capability plugin's FFI export.
-fusion-capability-datafusion = { path = "../../capability/fusion-capability-datafusion", default-features = false }
-datafusion = { version = "=54.1.0", default-features = false, features = ["sql", "parquet"] }
-tokio = { version = "1.48.0", features = ["full"] }
-mlua = { version = "0.10.2", features = ["lua54", "send", "async"] }
-tera = "1.20.0"
+# Deliberately NOT linked here: the DataFusion engine lives only in the
+# capability dylib (fusion-capability-datafusion). This unit talks to it
+# through the SDK `CapabilitySqlEngine` trait and the C-ABI engine factory.
+tokio = { version = "1.48.0", features = ["sync"] }
 anyhow = "1.0.100"
 log = "0.4"
 async-trait = "0.1.83"
-protobuf = "3.7.1"
-serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"

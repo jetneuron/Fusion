@@ -121,6 +121,7 @@ datasources:
 - `DataSourceConfig` trait + `GenericDataSourceConfig` + `ConfigRegistry` in SDK
 - `FileConfigProvider` (YAML) + `ProgrammaticConfigProvider` (code)
 - Typed access via `config::read_config().get_typed::<RedisDataSourceConfig>("redis-cache")`
+- The registry is injected into dylibs as JSON (`InjectedConfig` entries) via their `set_config` C symbol; the YAML `config:` section (category → type → id → data) populates it at runtime build
 
 ### Node roles
 
@@ -167,10 +168,18 @@ Edge conditions are Lua one-liners compiled into a `function(row) ... end` that 
 
 ### DataFusion unit (`SqlUnitTask`)
 
-SQL execution is split into a unit (`SqlUnitTask` in `fusion-unit-datafusion`) and a capability (`DataFusionCapability`, process-global `SessionContext`):
+SQL execution is split across three binary images — only the capability dylib contains DataFusion code:
 
-- **Static tables** (`tables` in YAML): reference a `provider` (e.g. `csv`, `sqlite`) and a `config_id` into the central `ConfigRegistry`. Providers implement `TableProviderFactory` and register into a global registry (`providers::register_provider`); external provider crates (e.g. `fusion-unit-datafusion-sqlite`) implement `ProviderPlugin`.
-- **Stream tables** (`stream_tables`): rows from upstream nodes are buffered per source in `Vec<Arc<StdMutex<Vec<Row>>>>`; when a buffer exceeds `row_threshold` (default 80000) it spills to Parquet. At EOF, remaining buffers spill, each source's data directory registers as a Parquet table, SQL runs, results emit downstream, and temp files clean up.
+- **Capability** (`fusion-capability-datafusion`): owns the process-global `SessionContext` and all DataFusion types. Exposes the C-ABI `SqlEngineFactory` table (`create_engine`/`query`/`register_frame_table`/`finalize_frame_table`/`register_csv_table`/`deregister_table`/`drop_engine`, from SDK `sql_engine_ffi`) via `init_sql_engine_factory`.
+- **Unit** (`fusion-unit-datafusion`): engine-free. Wraps the factory as `FfiSqlEngine` implementing SDK `CapabilitySqlEngine`; each call hops to a worker thread (`std::thread` + tokio oneshot — async never crosses the C ABI) and blocks on the engine's runtime.
+- **Providers** (`fusion-unit-datafusion-<name>`, e.g. `-sqlite`): data-source adapters. Implement SDK `TableDataProvider::load_frames(sql) -> Vec<Frame>` (rusqlite, …) and `ProviderPlugin::register_providers()`.
+
+**Isolation model**: Rust statics/vtables are per-binary-image, so the host injects everything dylibs need through `set_*` symbols — `set_config` (config registry JSON), `set_sql_engine_factory` (unit ← capability), `set_host_providers` (unit ← provider fat pointers). Data crosses FFI as protobuf `Frame`s; engine/provider types never leave their owning image.
+
+**Layout consistency**: SDK types passed by value across images (`ComputingUnit`, `serde_json::Value`) must have identical memory layout in every image. `serde_json` `preserve_order` changes `Value::Map` (IndexMap vs BTreeMap → different size), which shifts `ComputingUnit.config`'s offset — if the host tree enables it (e.g. via `deno_core`) but a dylib doesn't, the dylib reads garbage discriminants and crashes (SIGILL in `Value::clone`'s jump table). `fusion-unit-sdk` pins `preserve_order` so all images agree; never gate it behind features.
+
+- **Static tables** (`tables` in YAML): reference a `provider` (e.g. `csv`, `sqlite`) and a `config_id` into the central `ConfigRegistry`. `csv` resolves the file path from the registry and calls `register_csv_table`; other providers look up `HOST_PROVIDERS["{provider}#{config_id}"]`, pull frames via `load_frames(sql)`, and register them as frame tables.
+- **Stream tables** (`stream_tables`): upstream frames are buffered per source (`tokio::sync::Mutex<Vec<Frame>>`, parallel-worker safe); at EOF each buffer drains → `register_frame_table` + `finalize_frame_table` → SQL runs → results emit downstream → tables deregister (no leak into other graphs sharing the session). Registration is last-writer-wins so parallel graphs reusing table names don't error.
 - **Node roles**: as a source (`incoming=0`) it executes immediately in `launch()`; as a map it buffers stream rows in `compute()` and executes in `on_eof()`.
 
 ### Adding a new unit type
@@ -184,9 +193,10 @@ SQL execution is split into a unit (`SqlUnitTask` in `fusion-unit-datafusion`) a
 ### Adding a new table provider (DataFusion)
 
 1. Create `crates/fusion-plugins/units/fusion-unit-datafusion/providers/fusion-unit-datafusion-<name>/` with `crate-type = ["cdylib", "lib"]`.
-2. Implement `TableProviderFactory` (from `fusion_unit_datafusion::providers`) — `name()` + async `create(entry, sql)` returning a `TableProvider`.
-3. Implement `ProviderPlugin` and export `init_provider_plugin` FFI symbol; call `providers::register_provider(Arc::new(factory))` in `register()`.
-4. Register the plugin in the test harness; reference it from YAML as `provider: <name>` with a matching `config_id` in the datasource registry.
+2. Implement SDK `TableDataProvider` — async `load_frames(sql)` returning one protobuf `Frame` per row (probe column names by running the query, then iterate the result set).
+3. Implement `ProviderPlugin` — `register_providers()` returns `Vec<(String, Arc<dyn TableDataProvider>)>` keyed `"{provider}#{config_id}"` (one entry per datasource config it owns, read from the injected config registry).
+4. Export `init_provider_plugin` FFI symbol (host scans for it when loading provider dylibs).
+5. Reference it from YAML as `provider: <name>` with a matching `config_id`; static tests inject via `register_providers()` + `inject_providers()`.
 
 ### Adding a new capability type
 
