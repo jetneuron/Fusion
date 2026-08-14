@@ -1,13 +1,7 @@
-use async_trait::async_trait;
 use chrono::{Local, TimeZone, Utc};
 use serde_json::{Value, to_value};
 use std::collections::HashMap;
 use tera::Result;
-
-#[async_trait]
-pub trait RegisterTeraBuiltinFunc {
-    async fn register_builtin_tera_functions(&mut self);
-}
 
 pub fn yyyy_mm_dd(args: &HashMap<String, Value>) -> Result<Value> {
     let mut copied_args = args.clone();

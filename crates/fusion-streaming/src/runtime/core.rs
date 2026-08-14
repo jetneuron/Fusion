@@ -156,8 +156,6 @@ impl LaunchEnv {
 pub struct PhysicalGraph {
     pub(crate) logical_graph: LogicalGraph,
     pub(crate) plugin_manager: Arc<Mutex<PluginManager>>,
-    pub(crate) graph_lua: Arc<Mutex<Lua>>,
-    pub(crate) tera: Arc<Mutex<Tera>>,
     // pub(crate) typescript: Arc<Mutex<JsRuntime>>,
 }
 
@@ -165,25 +163,43 @@ impl PhysicalGraph {
     pub fn new(
         logical_graph: LogicalGraph,
         plugin_manager: Arc<Mutex<PluginManager>>,
-        graph_lua: Arc<Mutex<Lua>>,
-        tera: Arc<Mutex<Tera>>,
     ) -> Self {
         PhysicalGraph {
             logical_graph,
             plugin_manager,
-            graph_lua,
-            tera,
         }
     }
 
     pub async fn execute(&self, launch_env: Option<LaunchEnv>) -> UnitResult<()> {
+        // Per-graph script engines — each execution gets its own Lua VM
+        // and Tera instance so concurrent graphs never share scope state
+        // (scope tables are keyed by unit_id; a shared VM would collide).
+        let graph_lua: Arc<Mutex<Lua>> = Arc::new(Mutex::new(mlua::Lua::new()));
+        let tera: Arc<Mutex<Tera>> = Arc::new(Mutex::new(Tera::default()));
+        {
+            let mut tera = tera.lock().await;
+            tera.register_function(
+                "yyyyMMdd",
+                crate::utils::tera_func::yyyymmdd,
+            );
+            tera.register_function(
+                "yyyy_MM_dd",
+                crate::utils::tera_func::yyyy_mm_dd,
+            );
+            tera.register_function("now", crate::utils::tera_func::now);
+            tera.register_function(
+                "time",
+                crate::utils::tera_func::human_time,
+            );
+        }
+
         let mut runtime_launch_env = if let Some(env) = self.logical_graph.env.clone() {
             env.merge(launch_env)
         } else {
             launch_env.unwrap_or_default()
         };
-        runtime_launch_env.runtime_env(self.tera.clone()).await?;
-        runtime_launch_env.runtime_params(self.tera.clone()).await?;
+        runtime_launch_env.runtime_env(tera.clone()).await?;
+        runtime_launch_env.runtime_params(tera.clone()).await?;
 
         #[cfg(feature = "trace-physical")]
         debug!("launch_env: {}", json!(runtime_launch_env).to_string());
@@ -197,8 +213,8 @@ impl PhysicalGraph {
         let graph_id = self.logical_graph.get_id();
         let mut pet_graph: PetGraph = (&self.logical_graph).clone().into();
         let states = GraphStates::new(graph_id);
-        states.register(GraphLua(self.graph_lua.clone()))?;
-        states.register(GraphTera(self.tera.clone()))?;
+        states.register(GraphLua(graph_lua.clone()))?;
+        states.register(GraphTera(tera.clone()))?;
         //states.register(GraphJavascript(self.typescript.clone()))?;
 
         let start_nodes: Vec<NodeIndex> = pet_graph
@@ -234,7 +250,7 @@ impl PhysicalGraph {
 
                     if let Some(conf) = unit.get_config() {
                         let runtime_config = crate::utils::context_var_util::calculate_runtime(
-                            self.tera.clone(),
+                            tera.clone(),
                             tera_context.clone(),
                             conf,
                         )

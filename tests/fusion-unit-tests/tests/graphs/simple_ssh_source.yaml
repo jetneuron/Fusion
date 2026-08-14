@@ -16,7 +16,7 @@ units:
     name: output_node
     type: DebugOutputUnitTask
     config:
-      hide_console: true
+      hide_console: false
       show_report: true
 
 edges:

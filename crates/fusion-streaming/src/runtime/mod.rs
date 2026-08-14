@@ -2,7 +2,6 @@ use crate::graph::core::LogicalGraph;
 use crate::runtime::core::PhysicalGraph;
 use async_trait::async_trait;
 use lazy_static::lazy_static;
-use tera::Function;
 
 pub mod core;
 pub mod physical;
@@ -17,11 +16,14 @@ lazy_static! {
         format!("{} / {}", PRODUCT_NAME.as_str(), PRODUCT_VER.as_str());
 }
 
+/// Graph runtime factory. Implementations build [`PhysicalGraph`] from
+/// logical graph sources (YAML/JSON strings, file URLs).
+///
+/// Script engines (Lua/Tera) are created **per execution** inside
+/// [`PhysicalGraph::execute`], so concurrent graphs are fully isolated.
 #[async_trait]
 pub trait GraphRuntime {
     fn create<T: Into<LogicalGraph>>(&self, graph: T) -> PhysicalGraph;
-
-    async fn register_tera_function<F: Function + 'static>(&mut self, name: &str, function: F) {}
 }
 
 pub(crate) const EVENT_TYPE_EOF: i32 = 1 << 0;

@@ -10,7 +10,6 @@ use fusion_unit_sdk::graph::types::ComputingUnit;
 use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
 
 use fusion_streaming::runtime::core::LaunchEnv;
-use fusion_streaming::utils::tera_func::RegisterTeraBuiltinFunc;
 use fusion_unit_excel::SpreadSheetUnitTask;
 use fusion_unit_ssh::SSHUnitTask;
 use fusion_unit_universal_fs::UniversalFsUnitTask;
@@ -61,7 +60,6 @@ pub(crate) async fn register_plugin_execute(
         plugin_manager.register_plugin(path).await;
     }
     let mut runtime = SandboxRuntime::new(plugin_manager);
-    runtime.register_builtin_tera_functions().await;
     let file = graph;
     let graph_path = format!(
         "file://{}/tests/graphs/{}",
@@ -92,7 +90,6 @@ pub(crate) async fn execute_with_env(graph: &str, params: Option<Value>) -> anyh
         .add_plugin("test", Box::new(TestPlugin::default()))
         .await;
     let mut runtime = SandboxRuntime::new(plugin_manager);
-    runtime.register_builtin_tera_functions().await;
     let file = graph;
     let graph_path = format!(
         "file://{}/tests/graphs/{}",

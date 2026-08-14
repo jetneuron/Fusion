@@ -9,11 +9,11 @@ units:
       sheet_name: "Sheet1"
       field_name_row_index: 1
       skip_rows: 3
-#      field_names:
-#        - name: "foo1"
-#          data_type: i32
-#        - name: "bar"
-#          data_type: str
+      field_names:
+        - name: "foo1"
+          data_type: i32
+        - name: "bar"
+          data_type: str
 
   - id: uid2
     name: output_node

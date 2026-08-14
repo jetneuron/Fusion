@@ -3,7 +3,6 @@ use fusion_streaming::runtime::core::LaunchEnv;
 use fusion_streaming::runtime::plugin::PluginManager;
 use fusion_streaming::runtime::sandbox::SandboxRuntime;
 use fusion_streaming::runtime::GraphRuntime;
-use fusion_streaming::utils::tera_func::RegisterTeraBuiltinFunc;
 use fusion_unit_sdk::capability;
 use fusion_unit_sdk::capability::CapabilityPlugin;
 use fusion_unit_sdk::config;
@@ -43,7 +42,6 @@ async fn execute_with_redis(graph: &str) -> anyhow::Result<()> {
         .add_plugin("test", Box::new(TestPlugin::default()))
         .await;
     let mut runtime = SandboxRuntime::new(plugin_manager);
-    runtime.register_builtin_tera_functions().await;
 
     let graph_path = format!(
         "file://{}/tests/graphs/{}",

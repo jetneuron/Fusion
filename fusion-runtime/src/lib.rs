@@ -38,9 +38,11 @@ use fusion_streaming::runtime::plugin::PluginManager;
 use fusion_unit_sdk::runtime::UnitResult;
 use fusion_unit_sdk::GraphUnitPlugin;
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 
 // ============================================================
 // FusionRuntime
@@ -48,13 +50,13 @@ use tokio::sync::Mutex;
 
 /// The Fusion streaming runtime.
 ///
-/// Owns the plugin manager, script engines (Lua, Tera), and capability
-/// registry. Created via [`FusionRuntimeBuilder`] or the [`FusionRuntime::init_app()`]
+/// Owns the plugin manager and capability registry. Script engines
+/// (Lua, Tera) are created **per graph execution** inside
+/// [`PhysicalGraph::execute`] — concurrent graphs are fully isolated.
+/// Created via [`FusionRuntimeBuilder`] or the [`FusionRuntime::init_app()`]
 /// convenience method.
 pub struct FusionRuntime {
     plugin_manager: Arc<Mutex<PluginManager>>,
-    lua: Arc<Mutex<mlua::Lua>>,
-    tera: Arc<Mutex<tera::Tera>>,
     config: FusionConfig,
 }
 
@@ -94,18 +96,16 @@ impl FusionRuntime {
     /// Execute a graph.
     ///
     /// `source` may be inline YAML/JSON, or a `file://` URL.
+    /// Each call creates its own Lua/Tera engines — concurrent graphs
+    /// are isolated.
     pub async fn execute(
         &self,
         source: impl Into<LogicalGraph>,
         env: Option<LaunchEnv>,
     ) -> UnitResult<()> {
         let logical_graph: LogicalGraph = source.into();
-        let physical = PhysicalGraph::new(
-            logical_graph,
-            self.plugin_manager.clone(),
-            self.lua.clone(),
-            self.tera.clone(),
-        );
+        let physical =
+            PhysicalGraph::new(logical_graph, self.plugin_manager.clone());
         physical.execute(env).await
     }
 
@@ -257,8 +257,9 @@ impl FusionRuntimeBuilder {
     /// 3. Auto-scan config lib directories (if config was provided).
     /// 4. Load capability dylibs.
     /// 5. Load unit dylibs.
-    /// 6. Create Lua and Tera script engines.
-    /// 7. Register Tera built-in functions.
+    ///
+    /// Script engines are created per graph execution (see
+    /// [`FusionRuntime::execute`]), not at build time.
     pub async fn build(mut self) -> anyhow::Result<FusionRuntime> {
         // 1. Plugin manager.
         let plugin_manager = PluginManager::new().await;
@@ -285,25 +286,10 @@ impl FusionRuntimeBuilder {
             log::info!("Loaded unit plugin: {path}");
         }
 
-        // 6. Script engines.
-        let lua = Arc::new(Mutex::new(mlua::Lua::new()));
-        let mut tera = tera::Tera::default();
-
-        // 7. Register built-in Tera functions.
-        tera.register_function("yyyyMMdd", fusion_streaming::utils::tera_func::yyyymmdd);
-        tera.register_function(
-            "yyyy_MM_dd",
-            fusion_streaming::utils::tera_func::yyyy_mm_dd,
-        );
-        tera.register_function("now", fusion_streaming::utils::tera_func::now);
-        tera.register_function("time", fusion_streaming::utils::tera_func::human_time);
-
         let config = self.config.unwrap_or_default();
 
         Ok(FusionRuntime {
             plugin_manager: Arc::new(Mutex::new(plugin_manager)),
-            lua,
-            tera: Arc::new(Mutex::new(tera)),
             config,
         })
     }
@@ -382,5 +368,106 @@ impl FusionRuntimeBuilder {
             .with_redis()
             .with_net()
             .with_universal_fs()
+    }
+}
+
+// ============================================================
+// GraphExecutor — multi-graph lifecycle management
+// ============================================================
+
+/// Execution status of a submitted graph.
+#[derive(Debug, Clone)]
+pub enum GraphStatus {
+    /// Graph is queued or running.
+    Running,
+    /// Graph finished successfully.
+    Done,
+    /// Graph failed with an error message.
+    Failed(String),
+}
+
+/// A background executor that runs multiple graphs concurrently.
+///
+/// Each [`submit`](Self::submit) call spawns an independent tokio task;
+/// per-graph script engines guarantee isolation. The shared
+/// [`PluginManager`] registry is read-only during execution, so
+/// concurrent graphs never interfere.
+pub struct GraphExecutor {
+    runtime: Arc<FusionRuntime>,
+    tasks: Arc<Mutex<HashMap<String, JoinHandle<UnitResult<()>>>>>,
+}
+
+impl GraphExecutor {
+    pub fn new(runtime: Arc<FusionRuntime>) -> Self {
+        Self {
+            runtime,
+            tasks: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Submit a graph (YAML/JSON string or file URL) for execution in
+    /// the background. Returns the graph id.
+    pub async fn submit(
+        &self,
+        source: impl Into<LogicalGraph>,
+        env: Option<LaunchEnv>,
+    ) -> String {
+        let graph: LogicalGraph = source.into();
+        let graph_id = graph.get_id();
+        let runtime = self.runtime.clone();
+        let handle = tokio::spawn(async move {
+            runtime.execute(graph, env).await
+        });
+        self.tasks.lock().await.insert(graph_id.clone(), handle);
+        graph_id
+    }
+
+    /// Check the status of a submitted graph.
+    ///
+    /// `None` means the id is unknown (never submitted, or already
+    /// reaped after completion).
+    pub async fn status(&self, id: &str) -> Option<GraphStatus> {
+        let mut tasks = self.tasks.lock().await;
+        let handle = tasks.remove(id)?;
+        if handle.is_finished() {
+            match handle.await {
+                Ok(Ok(())) => Some(GraphStatus::Done),
+                Ok(Err(e)) => Some(GraphStatus::Failed(e.to_string())),
+                Err(e) => Some(GraphStatus::Failed(format!("task panicked: {e}"))),
+            }
+        } else {
+            tasks.insert(id.to_string(), handle);
+            Some(GraphStatus::Running)
+        }
+    }
+
+    /// Cancel a running graph. Returns `true` if it was still running.
+    pub async fn cancel(&self, id: &str) -> bool {
+        let mut tasks = self.tasks.lock().await;
+        match tasks.remove(id) {
+            Some(handle) => {
+                handle.abort();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Block until a submitted graph finishes.
+    pub async fn wait(&self, id: &str) -> Option<UnitResult<()>> {
+        let mut tasks = self.tasks.lock().await;
+        let handle = tasks.remove(id)?;
+        match handle.await {
+            Ok(result) => Some(result),
+            Err(e) => Some(Err(fusion_unit_sdk::runtime::UnitError::unknown(
+                format!("task panicked: {e}"),
+            ))),
+        }
+    }
+
+    /// Number of currently running graphs.
+    pub async fn running_count(&self) -> usize {
+        let tasks = self.tasks.lock().await;
+        tasks.values().filter(|h| !h.is_finished()).count()
     }
 }
