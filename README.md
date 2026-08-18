@@ -181,7 +181,7 @@ Fusion has two kinds of plugins, both loaded as dylibs at runtime:
 - **Unit plugins** — provide graph node types (source / map / sink); implement the SDK `GraphUnitPlugin` and export `init_plugin`
 - **Capability plugins** — provide process-global services (e.g. KV store, SQL engine); implement a `Capability*` trait and export `init_capability_plugin`
 
-The host injects config and dependencies into plugin dylibs through three C symbols: `set_config` / `set_sql_engine_factory` / `set_host_providers` (see [DataFusion Integration](doc/datafusion.md#33-注入协议host-dylib)).
+The host injects config and dependencies into plugin dylibs through three C symbols: `set_config` / `set_sql_engine_factory` / `set_host_providers` (see [DataFusion Integration](doc/datafusion.md#33-injection-protocol-host-dylib)).
 
 ## 🤝 Contributing
 
