@@ -11,10 +11,10 @@
 use std::ffi::{c_char, c_void};
 
 use fusion_unit_sdk::capability::{Capability, CapabilitySqlEngine};
+use fusion_unit_sdk::ffi::sql_engine_ffi::SqlEngineFactory;
 use fusion_unit_sdk::proto::transfer::Frame;
 use fusion_unit_sdk::runtime::UnitError;
 use fusion_unit_sdk::runtime::UnitResult;
-use fusion_unit_sdk::sql_engine_ffi::SqlEngineFactory;
 
 /// Run a synchronous engine call on a std thread and await its result.
 /// (tokio's `spawn_blocking` needs this crate's tokio runtime context on

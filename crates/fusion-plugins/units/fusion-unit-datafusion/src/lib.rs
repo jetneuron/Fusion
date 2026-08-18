@@ -47,13 +47,14 @@ use std::sync::OnceLock;
 use fusion_derive::LogicalTask;
 use fusion_unit_sdk::capability::CapabilitySqlEngine;
 use fusion_unit_sdk::config;
+use fusion_unit_sdk::ffi::config_ffi::HostConfigApi;
+use fusion_unit_sdk::ffi::sql_engine_ffi::{HostProviders, SqlEngineFactory};
 use fusion_unit_sdk::graph::types::{
     ComputingUnit, InitUnit, MapUnit, SourceUnit, TaskContext, UnitMeta,
 };
 use fusion_unit_sdk::proto::transfer::Frame;
 use fusion_unit_sdk::providers::TableDataProvider;
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
-use fusion_unit_sdk::sql_engine_ffi::{HostProviders, SqlEngineFactory};
 use fusion_unit_sdk::units::config_util::UnitConfigExt;
 use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
 
@@ -65,7 +66,9 @@ use ffi_engine::FfiSqlEngine;
 // Rust statics are per-binary-image: the engine factory, provider
 // objects and config registry populated in the host (or another dylib)
 // are invisible to this unit dylib. The host injects them through the
-// `set_*` C symbols below.
+// `set_*` C symbols below. Config arrives via the live `set_host_config`
+// query API (entries registered after load stay visible); `set_config`
+// is the legacy snapshot fallback for hosts that only know that symbol.
 // ============================================================
 
 static ENGINE_FACTORY: OnceLock<SqlEngineFactory> = OnceLock::new();
@@ -100,6 +103,17 @@ pub extern "C" fn set_host_providers(providers: HostProviders) {
     inject_providers(list);
 }
 
+/// Install the host's live config query API — every `config::read()` in
+/// this image then refreshes from the host registry, so entries
+/// registered after dylib load stay visible.
+#[cfg(feature = "cdylib")]
+#[unsafe(no_mangle)]
+pub extern "C" fn set_host_config(api: HostConfigApi) {
+    fusion_unit_sdk::ffi::config_ffi::set_host_api(api);
+}
+
+/// Legacy snapshot fallback: the host serialized its registry at load
+/// time. Only used by hosts that don't call [`set_host_config`].
 #[cfg(feature = "cdylib")]
 #[unsafe(no_mangle)]
 pub extern "C" fn set_config(json: *const std::ffi::c_char) {

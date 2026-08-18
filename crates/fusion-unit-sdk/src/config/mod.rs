@@ -228,17 +228,49 @@ pub fn register(f: impl FnOnce(&mut ConfigRegistry)) {
 /// let redis: RedisConfig = config::get("redis-cache").unwrap();
 /// ```
 pub fn get<T: serde::de::DeserializeOwned>(id: &str) -> Option<T> {
-    registry().read().get(id)
+    read().get(id)
 }
 
 /// Acquire a read lock on the global config registry.
+///
+/// In dylib deployment the registry is refreshed from the host (live
+/// query) before the lock is taken — see [`refresh_from_host`].
 pub fn read() -> parking_lot::RwLockReadGuard<'static, ConfigRegistry> {
+    refresh_from_host();
     registry().read()
 }
 
 /// Acquire a write lock on the global config registry.
 pub fn write() -> parking_lot::RwLockWriteGuard<'static, ConfigRegistry> {
     registry().write()
+}
+
+/// Refresh this image's registry from the host's, when a live config API
+/// is installed (dylib deployment). Static/embedded images have no host
+/// API and are unaffected.
+///
+/// The host is the single source of truth: entries it no longer holds
+/// disappear here too (REPLACE, not merge). A failed fetch keeps the
+/// current contents — a read error must never wipe the registry.
+///
+/// `try_write` never blocks: a reentrant read (e.g. a capability factory
+/// invoked while this thread holds a read guard) must not deadlock on
+/// parking_lot's non-reentrant write — the refresh is skipped and retried
+/// on the next read.
+fn refresh_from_host() {
+    let Some(api) = crate::ffi::config_ffi::host_api() else {
+        return;
+    };
+    let Some(entries) = crate::ffi::config_ffi::fetch_all(api) else {
+        return;
+    };
+    let mut fresh = ConfigRegistry::new();
+    for e in entries {
+        fresh.insert(e.category, e.config_type, e.id, e.data);
+    }
+    if let Some(mut reg) = registry().try_write() {
+        *reg = fresh;
+    }
 }
 
 // ============================================================
@@ -251,6 +283,13 @@ pub fn write() -> parking_lot::RwLockWriteGuard<'static, ConfigRegistry> {
 /// process are invisible to unit/provider dylibs. The host serializes
 /// its registry as `Vec<InjectedConfig>` JSON and hands it to dylibs
 /// through a `set_config` C symbol, which calls [`inject_entries`].
+///
+/// `set_config` is the **legacy snapshot** path. New dylibs prefer the
+/// live [`config_ffi::HostConfigApi`](crate::ffi::config_ffi::HostConfigApi)
+/// (`set_host_config` export): every [`read()`] refreshes from the host,
+/// so entries registered after dylib load are visible immediately. The
+/// snapshot remains as a fallback for dylibs that do not export
+/// `set_host_config`.
 #[derive(Debug, Clone, serde_derive::Serialize, serde_derive::Deserialize)]
 pub struct InjectedConfig {
     pub category: String,

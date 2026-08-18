@@ -1,6 +1,6 @@
 use crate::graph::types::ComputingUnit;
 use crate::runtime::logical::LogicalTask;
-use crate::runtime::{UnitResult, GLOBAL_REGISTRY};
+use crate::runtime::{GLOBAL_REGISTRY, UnitResult};
 use std::collections::HashSet;
 use std::hash::Hash;
 
@@ -12,8 +12,8 @@ pub mod proto;
 pub mod frame;
 pub mod providers;
 pub mod runtime;
-pub mod sql_engine_ffi;
 pub mod units;
+pub mod ffi;
 
 #[derive(Default, Clone)]
 pub struct UnitManifest {

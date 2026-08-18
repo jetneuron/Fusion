@@ -5,16 +5,18 @@
 //! no DataFusion types live in this dylib, so it stays small and the
 //! engine boundary stays clean.
 //!
-//! The host injects the datasource config registry via `set_config`
-//! (a C symbol, same protocol as unit dylibs), then calls
+//! The host injects the datasource config registry via the live
+//! `set_host_config` query API (a C symbol, same protocol as unit
+//! dylibs; `set_config` is the legacy snapshot fallback), then calls
 //! `init_provider_plugin` and collects [`register_providers`](ProviderPlugin::register_providers)
 //! — one provider per `sqlite` datasource config entry, keyed
 //! `"sqlite#{config_id}"`.
 
-use std::ffi::{c_char, CStr};
+use std::ffi::{CStr, c_char};
 use std::sync::Arc;
 
 use fusion_unit_sdk::config;
+use fusion_unit_sdk::ffi::config_ffi::HostConfigApi;
 use fusion_unit_sdk::proto::transfer::{Column, DataType, Frame};
 use fusion_unit_sdk::providers::{ProviderPlugin, TableDataProvider};
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
@@ -161,9 +163,16 @@ impl ProviderPlugin for SqliteProviderPlugin {
 // FFI exports
 // ============================================================
 
-/// Install the config registry injected from the host into this dylib
-/// image (statics are per-binary-image — the host's entries are
-/// invisible here without this).
+/// Install the host's live config query API — every `config::read()` in
+/// this image then refreshes from the host registry, so entries
+/// registered after dylib load stay visible.
+#[unsafe(no_mangle)]
+pub extern "C" fn set_host_config(api: HostConfigApi) {
+    fusion_unit_sdk::ffi::config_ffi::set_host_api(api);
+}
+
+/// Legacy snapshot fallback: the host serialized its registry at load
+/// time. Only used by hosts that don't call [`set_host_config`].
 #[unsafe(no_mangle)]
 pub extern "C" fn set_config(json: *const c_char) {
     if json.is_null() {

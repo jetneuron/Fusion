@@ -37,10 +37,11 @@
 //! #         target/debug/libfusion_capability_example.so    (Linux)
 //! ```
 
-use fusion_unit_sdk::capability::capability_key_value_store::{
-    well_known, ScanOptions, ScanResult,
+use fusion_unit_sdk::capability::capability_key_value_store::{ScanOptions, ScanResult,
+                                                              well_known,
 };
 use fusion_unit_sdk::capability::{self, Capability, CapabilityKeyValueStore, CapabilityPlugin};
+use fusion_unit_sdk::ffi::config_ffi::HostConfigApi;
 use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -242,6 +243,13 @@ impl CapabilityPlugin for ExampleCapabilityPlugin {
 #[unsafe(no_mangle)]
 pub extern "C" fn init_capability_plugin() -> Box<dyn CapabilityPlugin + Send + Sync> {
     Box::new(ExampleCapabilityPlugin)
+}
+
+/// Install the host's live config query API — config-driven capability
+/// factories read config through this image's own registry.
+#[unsafe(no_mangle)]
+pub extern "C" fn set_host_config(api: HostConfigApi) {
+    fusion_unit_sdk::ffi::config_ffi::set_host_api(api);
 }
 
 // ============================================================

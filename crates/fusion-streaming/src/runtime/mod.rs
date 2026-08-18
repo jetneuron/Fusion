@@ -9,6 +9,8 @@ pub mod plugin;
 pub mod sandbox;
 pub mod scripts;
 
+mod config_bridge;
+
 lazy_static! {
     pub static ref PRODUCT_NAME: String = "FusionPro".to_string();
     pub static ref PRODUCT_VER: String = "0.1.0".to_string();

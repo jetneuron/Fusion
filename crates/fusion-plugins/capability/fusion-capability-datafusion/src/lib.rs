@@ -29,13 +29,14 @@ use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
 use fusion_unit_sdk::capability::capability_sql_engine::well_known;
 use fusion_unit_sdk::capability::{self, Capability, CapabilityPlugin, CapabilitySqlEngine};
+use fusion_unit_sdk::ffi::config_ffi::HostConfigApi;
+use fusion_unit_sdk::ffi::sql_engine_ffi::{SqlEngineFactory, leak_frames, take_frames};
 use fusion_unit_sdk::proto::transfer::{Column, DataType, Frame};
 use fusion_unit_sdk::runtime::UnitResult;
-use fusion_unit_sdk::sql_engine_ffi::{leak_frames, take_frames, SqlEngineFactory};
-use protobuf::EnumOrUnknown;
 use log;
+use protobuf::EnumOrUnknown;
 use std::collections::HashMap;
-use std::ffi::{c_char, c_void, CStr};
+use std::ffi::{CStr, c_char, c_void};
 use std::sync::{Arc, OnceLock};
 use tokio::runtime::Runtime;
 use tokio::sync::Mutex;
@@ -445,6 +446,14 @@ pub fn sql_engine_factory() -> SqlEngineFactory {
 #[unsafe(no_mangle)]
 pub extern "C" fn init_sql_engine_factory() -> SqlEngineFactory {
     sql_engine_factory()
+}
+
+/// Install the host's live config query API — config-driven capability
+/// factories read config through this image's own registry.
+#[cfg(feature = "cdylib")]
+#[unsafe(no_mangle)]
+pub extern "C" fn set_host_config(api: HostConfigApi) {
+    fusion_unit_sdk::ffi::config_ffi::set_host_api(api);
 }
 
 unsafe fn cap_from_handle<'a>(handle: *mut c_void) -> &'a DataFusionCapability {

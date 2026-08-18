@@ -3,16 +3,16 @@ use crate::task::builtin::{
 };
 use crate::task::http_unit::HttpUnitTask;
 use fusion_unit_sdk::capability::CapabilityPlugin;
-use fusion_unit_sdk::config;
+use fusion_unit_sdk::ffi::config_ffi::HostConfigApi;
+use fusion_unit_sdk::ffi::sql_engine_ffi::{HostProviderEntry, HostProviders, SqlEngineFactory};
 use fusion_unit_sdk::graph::types::ComputingUnit;
 use fusion_unit_sdk::providers::{ProviderPlugin, TableDataProvider};
-use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use fusion_unit_sdk::runtime::logical::LogicalTask;
-use fusion_unit_sdk::sql_engine_ffi::{HostProviderEntry, HostProviders, SqlEngineFactory};
+use fusion_unit_sdk::runtime::{UnitError, UnitResult};
 use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
 use libloading::{Library, Symbol};
 use std::collections::HashMap;
-use std::ffi::{c_char, CString};
+use std::ffi::{CString, c_char};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -67,21 +67,22 @@ impl PluginManager {
         }
     }
 
-    /// Serialize the process-global config registry for FFI injection.
-    fn serialize_config() -> String {
-        let reg = config::read();
-        let entries: Vec<config::InjectedConfig> = reg
-            .ids()
-            .filter_map(|id| {
-                reg.entry(id).map(|e| config::InjectedConfig {
-                    category: e.category.clone(),
-                    config_type: e.config_type.clone(),
-                    id: id.clone(),
-                    data: e.data.clone(),
-                })
-            })
-            .collect();
-        serde_json::to_string(&entries).unwrap_or_default()
+    /// Inject the live config query API into a dylib that exports
+    /// `set_host_config`.
+    ///
+    /// Returns `false` for older dylibs without the symbol — callers
+    /// fall back to the legacy `set_config` snapshot.
+    fn inject_config_api(lib: &Library) -> bool {
+        let set_api = unsafe {
+            lib.get::<unsafe extern "C" fn(HostConfigApi)>(b"set_host_config")
+        };
+        match set_api {
+            Ok(set_api) => {
+                unsafe { set_api(crate::runtime::config_bridge::host_config_api()) };
+                true
+            }
+            Err(_) => false,
+        }
     }
 
     /// Load an external provider plugin (`.dylib` / `.so`) and collect
@@ -104,12 +105,17 @@ impl PluginManager {
                     }
                 };
             // Inject the host config registry so register_providers() can
-            // resolve its datasource entries (statics are per-image).
-            if let Ok(set_config) =
-                lib.get::<unsafe extern "C" fn(*const c_char)>(b"set_config")
-            {
-                let json = CString::new(Self::serialize_config()).unwrap_or_default();
-                set_config(json.as_ptr());
+            // resolve its datasource entries (statics are per-image). Live
+            // query API first; fall back to a `set_config` snapshot for
+            // dylibs that don't export `set_host_config`.
+            if !Self::inject_config_api(&lib) {
+                if let Ok(set_config) =
+                    lib.get::<unsafe extern "C" fn(*const c_char)>(b"set_config")
+                {
+                    let json = CString::new(crate::runtime::config_bridge::serialize_config())
+                        .unwrap_or_default();
+                    set_config(json.as_ptr());
+                }
             }
             plugin = Some(init());
             // Keep the dylib alive — provider trait objects live in it.
@@ -125,7 +131,7 @@ impl PluginManager {
             log::warn!(
                 "Provider plugin from `{path}` registered 0 providers — check \
                  `datasource:` config entries of the matching type (config is \
-                 injected into provider dylibs before register_providers())"
+                 queried live from the host registry before register_providers())"
             );
         }
         log::info!(
@@ -157,13 +163,17 @@ impl PluginManager {
                 };
 
             // Inject host state into this dylib's binary image: config
-            // registry, engine factory and provider objects. SqlUnitTask
+            // registry (live query API first, `set_config` snapshot
+            // fallback), engine factory and provider objects. SqlUnitTask
             // reads them when graphs execute.
-            if let Ok(set_config) =
-                lib.get::<unsafe extern "C" fn(*const c_char)>(b"set_config")
-            {
-                let json = CString::new(Self::serialize_config()).unwrap_or_default();
-                set_config(json.as_ptr());
+            if !Self::inject_config_api(&lib) {
+                if let Ok(set_config) =
+                    lib.get::<unsafe extern "C" fn(*const c_char)>(b"set_config")
+                {
+                    let json = CString::new(crate::runtime::config_bridge::serialize_config())
+                        .unwrap_or_default();
+                    set_config(json.as_ptr());
+                }
             }
             if let Ok(set_factory) =
                 lib.get::<unsafe extern "C" fn(SqlEngineFactory)>(b"set_sql_engine_factory")
@@ -249,6 +259,10 @@ impl PluginManager {
             {
                 *self.engine_factory.lock().await = Some(factory_sym());
             }
+            // Capability images read config too (e.g. capability::kv()
+            // factories); inject the live API if exported. Older dylibs
+            // without the symbol are fine — they see no host config.
+            Self::inject_config_api(&lib);
             capability = Some(init());
             self._libs.lock().await.push(lib);
         }

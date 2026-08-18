@@ -15,8 +15,9 @@
 //! ```
 
 use deadpool_redis::{Config, Pool, Runtime};
-use fusion_unit_sdk::capability::capability_key_value_store::{well_known, ScanOptions, ScanResult};
+use fusion_unit_sdk::capability::capability_key_value_store::{ScanOptions, ScanResult, well_known};
 use fusion_unit_sdk::capability::{self, Capability, CapabilityKeyValueStore, CapabilityPlugin};
+use fusion_unit_sdk::ffi::config_ffi::HostConfigApi;
 use fusion_unit_sdk::runtime::UnitResult;
 use std::sync::Arc;
 
@@ -370,6 +371,14 @@ impl CapabilityPlugin for RedisCapabilityPlugin {
 #[unsafe(no_mangle)]
 pub extern "C" fn init_capability_plugin() -> Box<dyn CapabilityPlugin + Send + Sync> {
     Box::new(RedisCapabilityPlugin)
+}
+
+/// Install the host's live config query API — config-driven capability
+/// factories (e.g. Redis connection pools) read config through this
+/// image's own registry.
+#[unsafe(no_mangle)]
+pub extern "C" fn set_host_config(api: HostConfigApi) {
+    fusion_unit_sdk::ffi::config_ffi::set_host_api(api);
 }
 
 // ============================================================
