@@ -1,0 +1,26 @@
+name: http_endpoint_manual_graph
+
+units:
+  - id: http
+    name: http_ingest
+    type: HttpEndpointUnitTask
+    version: unstable
+    config:
+      # Fixed port for manual testing with an external HTTP client.
+      port: 18080
+      remote_shutdown_enabled: true
+      api_key: "testapikey"
+
+  - id: output
+    name: output
+    type: DebugOutputUnitTask
+    version: builtin
+    config:
+      show_report: true
+
+edges:
+  - id: eid1
+    source: http
+    target: output
+    config:
+      fee: bee

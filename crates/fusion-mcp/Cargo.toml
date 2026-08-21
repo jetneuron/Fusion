@@ -1,0 +1,10 @@
+[package]
+name = "fusion-mcp"
+version = "0.1.0"
+authors.workspace = true
+homepage.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+rmcp = "3.1.4"

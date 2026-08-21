@@ -1,0 +1,39 @@
+name: http_endpoint_graph
+
+units:
+  - id: http
+    name: http_ingest
+    type: HttpEndpointUnitTask
+    version: unstable
+    config:
+      # Tera-rendered from LaunchEnv params (see http_endpoint_test.rs).
+      port: "{{ port }}"
+      remote_shutdown_enabled: true
+
+  - id: output
+    name: output
+    type: DebugOutputUnitTask
+    version: builtin
+    config:
+      show_report: true
+
+  - id: output_file
+    name: output_file
+    type: UniversalFsUnitTask
+    version: unstable
+    config:
+      uri: file://{{CARGO_MANIFEST_DIR}}/tests/output/http_endpoint_out.log
+      separator: "|"
+
+edges:
+  - id: eid1
+    source: http
+    target: output
+    config:
+      fee: bee
+
+  - id: eid2
+    source: http
+    target: output_file
+    config:
+      fee: bee

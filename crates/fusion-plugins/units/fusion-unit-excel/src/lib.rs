@@ -29,8 +29,9 @@ use std::sync::{Arc, Mutex};
 // default frame number to infer
 const DEFAULT_INFER_ROWS: usize = 20;
 
+#[cfg(feature = "cdylib")]
 #[unsafe(no_mangle)]
-pub extern "C" fn init_plugin() -> Box<dyn GraphUnitPlugin> {
+pub extern "C" fn init_plugin() -> Box<dyn GraphUnitPlugin + Send + Sync> {
     Box::new(ExcelUnitPlugin {})
 }
 

@@ -20,7 +20,8 @@ members = [
     "crates/fusion-plugins/units/fusion-unit-redis",
     "crates/fusion-plugins/units/fusion-unit-ssh",
     "crates/fusion-plugins/units/fusion-unit-universal-fs",
-    "crates/scripts/fusion-script-ts"]
+    "crates/scripts/fusion-script-ts",
+    "crates/fusion-mcp"]
 resolver = "3"
 
 [workspace.dependencies]

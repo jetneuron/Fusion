@@ -5,6 +5,16 @@ authors.workspace = true
 homepage.workspace = true
 edition.workspace = true
 
+[lib]
+crate-type = ["cdylib", "lib"]
+
+# `cdylib` gates the `no_mangle` FFI exports. Crates that depend on this
+# library disable it so their own dylibs don't accidentally export unit
+# plugins.
+[features]
+default = ["cdylib"]
+cdylib = []
+
 [dependencies]
 fusion-derive = { path = "../../../fusion-derive" }
 fusion-unit-sdk = {path = "../../../fusion-unit-sdk" }

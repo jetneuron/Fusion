@@ -10,6 +10,7 @@ use fusion_unit_sdk::{GraphUnitPlugin, UnitManifest};
 use fusion_streaming::runtime::core::LaunchEnv;
 use fusion_unit_datafusion::SqlUnitTask;
 use fusion_unit_excel::SpreadSheetUnitTask;
+use fusion_unit_net::HttpEndpointUnitTask;
 use fusion_unit_redis::RedisUnitTask;
 use fusion_unit_ssh::SSHUnitTask;
 use fusion_unit_universal_fs::UniversalFsUnitTask;
@@ -34,6 +35,9 @@ impl GraphUnitPlugin for TestPlugin {
 
         // Universal FS
         UniversalFsUnitTask::register_unit(&mut manifest, self.plugin_version());
+
+        // Net (HTTP ingest endpoint)
+        HttpEndpointUnitTask::register_unit(&mut manifest, self.plugin_version());
 
         // Redis (script-driven KV)
         RedisUnitTask::register_unit(&mut manifest, self.plugin_version());

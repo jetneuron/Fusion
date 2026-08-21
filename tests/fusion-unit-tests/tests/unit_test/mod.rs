@@ -4,6 +4,7 @@ use serde_json::json;
 
 mod datafusion_test;
 mod filesystem_test;
+mod http_endpoint_test;
 mod redis_test;
 mod ssh_test;
 
